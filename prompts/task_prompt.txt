@@ -5,6 +5,7 @@ Rules:
 - Modify code as needed.
 - Run tests if applicable.
 - Fix any errors you introduce.
+- Do NOT edit Todo.md yourself — the orchestrator marks tasks complete.
 - This is running unattended -- no one will see or answer a question. If
   anything is ambiguous, make the most reasonable judgment call yourself and
   proceed. Do not stop and wait for clarification.
