@@ -1206,6 +1206,22 @@ def main():
             for attempt in range(1, max_retries_per_provider + 1):
                 log(f"[{provider.name}] attempt {attempt}/{max_retries_per_provider}", color="dim")
                 exit_code, output, rate_limited = provider.run(prompt, working_directory, task_timeout)
+
+                # rate_limited is just a substring match over the CLI's combined
+                # output -- in this repo specifically, task text and generated code
+                # routinely contain "rate limit", "429", "quota" etc. as *domain
+                # vocabulary*, not as a real rate-limit error. Confirm it against
+                # the working tree before trusting it: a real rate-limit hit means
+                # the agent didn't get to do anything, so if files actually changed,
+                # this was a false positive on a genuine completion, not a real
+                # exhaustion event.
+                diff_stat = subprocess.run(
+                    ["git", "diff", "--stat"],
+                    cwd=working_directory, capture_output=True, text=True, timeout=2,
+                )
+                stat_output = diff_stat.stdout.strip() if diff_stat.returncode == 0 else ""
+                rate_limited = rate_limited and not stat_output
+
                 exit_color = "yellow" if rate_limited else ("green" if exit_code == 0 else "red")
                 log(f"[{provider.name}] exit code {exit_code}"
                     + (" (looked rate-limited)" if rate_limited else ""), color=exit_color)
@@ -1227,14 +1243,8 @@ def main():
 
                 # exit_code == 0 alone isn't proof a task actually did anything --
                 # a real incident: kilo reported success on a task and had made
-                # zero edits. Check whether the working tree actually changed and
-                # treat a "success" with no changes as suspicious rather than
-                # trusting it at face value, in both confirmation modes.
-                diff_stat = subprocess.run(
-                    ["git", "diff", "--stat"],
-                    cwd=working_directory, capture_output=True, text=True, timeout=2,
-                )
-                stat_output = diff_stat.stdout.strip() if diff_stat.returncode == 0 else ""
+                # zero edits. Treat a "success" with no changes as suspicious rather
+                # than trusting it at face value, in both confirmation modes.
                 suspicious = exit_code == 0 and diff_stat.returncode == 0 and not stat_output
                 if suspicious:
                     log(f"[{provider.name}] SUSPICIOUS: exit code 0 but no files changed -- "
