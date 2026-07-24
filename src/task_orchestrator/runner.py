@@ -283,6 +283,19 @@ def lint_config(config):
                     "Set a real value before running."
                 )
 
+    if (
+        not config.get("require_manual_confirmation", True)
+        and config.get("auto_commit", False)
+        and not config.get("verify_commands")
+    ):
+        warnings.append(
+            "require_manual_confirmation is false and auto_commit is true, but "
+            "verify_commands is empty -- every task where the agent exits 0 and "
+            "touches a file will be auto-accepted and committed with no correctness "
+            "check at all. Add a real verify_commands gate (e.g. a test suite) or "
+            "set require_manual_confirmation back to true."
+        )
+
     for w in warnings:
         log(w, color="yellow")
 

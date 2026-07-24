@@ -690,6 +690,33 @@ class TestLintConfig(unittest.TestCase):
             })
             self.assertEqual(output.strip(), "")
 
+    def test_warns_on_unattended_auto_commit_with_no_verification(self):
+        output = self._run_lint({
+            "require_manual_confirmation": False,
+            "auto_commit": True,
+            "verify_commands": [],
+            "providers": [{"name": "p", "command": "echo --auto", "env": {}, "rate_limit_patterns": []}],
+        })
+        self.assertIn("verify_commands is empty", output)
+
+    def test_no_warn_when_verify_commands_present(self):
+        output = self._run_lint({
+            "require_manual_confirmation": False,
+            "auto_commit": True,
+            "verify_commands": ["python -m unittest"],
+            "providers": [{"name": "p", "command": "echo --auto", "env": {}, "rate_limit_patterns": []}],
+        })
+        self.assertNotIn("verify_commands is empty", output)
+
+    def test_no_warn_on_unattended_no_verification_when_auto_commit_off(self):
+        output = self._run_lint({
+            "require_manual_confirmation": False,
+            "auto_commit": False,
+            "verify_commands": [],
+            "providers": [{"name": "p", "command": "echo --auto", "env": {}, "rate_limit_patterns": []}],
+        })
+        self.assertNotIn("verify_commands is empty", output)
+
 
 class TestLintTodo(unittest.TestCase):
     def _run_lint(self, content):
