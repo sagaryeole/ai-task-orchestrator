@@ -20,6 +20,7 @@ from orchestrator import (
     load_config,
     git_commit,
     run_verification,
+    lint_config,
     STATE_PATH,
 )
 
@@ -243,6 +244,77 @@ class TestSkipTask(unittest.TestCase):
             final_text = todo.read_text()
             self.assertIn("- [x] Task one", final_text)
             self.assertIn("- [x] Task two", final_text)
+
+
+class TestLintConfig(unittest.TestCase):
+    def _run_lint(self, cfg):
+        from unittest.mock import patch
+        with patch('orchestrator.log') as mock_log:
+            lint_config(cfg)
+        return ' '.join(str(call.args[0]) for call in mock_log.call_args_list)
+
+    def test_warns_on_missing_task_placeholder(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            template = Path(tmpdir) / "bad_template.txt"
+            template.write_text("Just some text without placeholder")
+            output = self._run_lint({
+                "prompt_template": str(template),
+                "providers": [{"name": "p", "command": "echo", "env": {}, "rate_limit_patterns": []}],
+            })
+            self.assertIn("does not contain '{{TASK}}'", output)
+
+    def test_no_warn_on_good_template(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            template = Path(tmpdir) / "good_template.txt"
+            template.write_text("Do this: {{TASK}}")
+            output = self._run_lint({
+                "prompt_template": str(template),
+                "providers": [{"name": "p", "command": "echo", "env": {}, "rate_limit_patterns": []}],
+            })
+            self.assertNotIn("does not contain '{{TASK}}'", output)
+
+    def test_warns_on_bare_claude(self):
+        output = self._run_lint({
+            "providers": [{"name": "claude-p", "command": "claude", "env": {}, "rate_limit_patterns": []}],
+        })
+        self.assertIn("bare/interactive", output)
+        self.assertIn("--no-interactive", output)
+
+    def test_no_warn_on_claude_with_headless_flag(self):
+        output = self._run_lint({
+            "providers": [{"name": "claude-p", "command": "claude --no-interactive", "env": {}, "rate_limit_patterns": []}],
+        })
+        self.assertNotIn("bare/interactive", output)
+
+    def test_warns_on_bare_kilo(self):
+        output = self._run_lint({
+            "providers": [{"name": "kilo-p", "command": "kilo", "env": {}, "rate_limit_patterns": []}],
+        })
+        self.assertIn("bare/interactive", output)
+        self.assertIn("--auto", output)
+
+    def test_warns_on_replace_me_env(self):
+        output = self._run_lint({
+            "providers": [{"name": "p", "command": "echo", "env": {"KEY": "REPLACE_ME"}, "rate_limit_patterns": []}],
+        })
+        self.assertIn("REPLACE_ME", output)
+
+    def test_no_warn_on_good_config(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            template = Path(tmpdir) / "good.txt"
+            template.write_text("{{TASK}}")
+            output = self._run_lint({
+                "prompt_template": str(template),
+                "providers": [
+                    {
+                        "name": "p",
+                        "command": "echo hello --auto",
+                        "env": {"KEY": "real-key"},
+                        "rate_limit_patterns": [],
+                    }
+                ],
+            })
+            self.assertEqual(output.strip(), "")
 
 
 if __name__ == "__main__":

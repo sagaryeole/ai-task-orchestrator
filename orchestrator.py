@@ -95,6 +95,74 @@ def validate_config(config):
         sys.exit("Config validation failed:\n" + "\n".join(f"  - {e}" for e in errors))
 
 
+_INTERACTIVE_LAUNCHERS = {
+    "claude": {
+        "headless_flags": ["--no-interactive", "--print", "-p"],
+        "message": "Claude Code is interactive by default; use --no-interactive or --print for unattended runs.",
+    },
+    "codex": {
+        "headless_flags": ["--quiet", "--no-interactive"],
+        "message": "Codex CLI may be interactive; use --quiet for unattended runs.",
+    },
+    "kilo": {
+        "headless_flags": ["--auto"],
+        "message": "Kilo Code is interactive by default; use --auto for unattended runs.",
+    },
+    "cursor": {
+        "headless_flags": [],
+        "message": "Cursor is an editor, not a headless agent CLI.",
+    },
+}
+
+
+def lint_config(config):
+    """Warn about common config pitfalls that would silently break unattended runs."""
+    warnings = []
+
+    prompt_template_path = Path(config.get("prompt_template", "prompts/task_prompt.txt"))
+    if prompt_template_path.exists():
+        content = prompt_template_path.read_text()
+        if "{{TASK}}" not in content:
+            warnings.append(
+                f"prompt_template ({prompt_template_path}) exists but does not contain '{{{{TASK}}}}'. "
+                "The task will not be substituted into the prompt."
+            )
+
+    for p in config.get("providers", []):
+        if not isinstance(p, dict):
+            continue
+        name = p.get("name", "unknown")
+        cmd = p.get("command", "")
+        if not cmd:
+            continue
+        try:
+            tokens = shlex.split(cmd)
+        except ValueError:
+            continue
+        if not tokens:
+            continue
+        base = tokens[0].lower()
+        if base in _INTERACTIVE_LAUNCHERS:
+            info = _INTERACTIVE_LAUNCHERS[base]
+            has_headless = any(flag in tokens for flag in info["headless_flags"])
+            if not has_headless:
+                warnings.append(
+                    f"Provider '{name}' command '{cmd}' looks like a bare/interactive "
+                    f"{base} launcher. {info['message']}"
+                )
+
+        env = p.get("env", {})
+        for k, v in env.items():
+            if isinstance(v, str) and "REPLACE_ME" in v:
+                warnings.append(
+                    f"Provider '{name}' env variable '{k}' still contains 'REPLACE_ME'. "
+                    "Set a real value before running."
+                )
+
+    for w in warnings:
+        log(w, color="yellow")
+
+
 def load_config(config_path=None):
     path = config_path or CONFIG_PATH
     if not path.exists():
@@ -564,6 +632,7 @@ def main():
     args = parser.parse_args()
 
     config = load_config(Path(args.config))
+    lint_config(config)
     global _json_log_enabled
     _json_log_enabled = args.json_logs or config.get("json_logs", False)
 
