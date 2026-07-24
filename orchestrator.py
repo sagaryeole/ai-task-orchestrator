@@ -36,6 +36,8 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 CONFIG_PATH = Path("config.json")
 STATE_PATH = Path("state.json")
 LOG_DIR = Path("logs")
+LOG_MAX_BYTES = 10 * 1024 * 1024  # 10 MB per file
+LOG_BACKUP_COUNT = 5
 TASK_REGEX = r"- \[ \] (.+)"
 TAG_REGEX = r"(\[\w+\])"
 STALL_CPU_THRESHOLD = 12.0  # %cpu below this counts as "idle" for stall detection.
@@ -46,6 +48,7 @@ STALL_CPU_THRESHOLD = 12.0  # %cpu below this counts as "idle" for stall detecti
 # 27-49%. 12.0 sits in the real gap between those two clusters.
 _json_log_enabled = False
 _current_process = None  # in-flight agent subprocess, so SIGINT can clean it up too
+_log_lock = threading.Lock()
 
 
 def log_json(event, **kwargs):
@@ -57,8 +60,24 @@ def log_json(event, **kwargs):
         **kwargs,
     }
     LOG_DIR.mkdir(exist_ok=True)
-    with open(LOG_DIR / "orchestrator.jsonl", "a") as f:
-        f.write(json.dumps(record) + "\n")
+    with _log_lock:
+        _rotate_log_file(LOG_DIR / "orchestrator.jsonl")
+        with open(LOG_DIR / "orchestrator.jsonl", "a") as f:
+            f.write(json.dumps(record) + "\n")
+
+
+def _rotate_log_file(log_path):
+    if not log_path.exists() or log_path.stat().st_size < LOG_MAX_BYTES:
+        return
+    oldest = Path(str(log_path) + f".{LOG_BACKUP_COUNT}")
+    if oldest.exists():
+        oldest.unlink()
+    for i in range(LOG_BACKUP_COUNT - 1, 0, -1):
+        src = Path(str(log_path) + f".{i}")
+        dst = Path(str(log_path) + f".{i + 1}")
+        if src.exists():
+            src.rename(dst)
+    log_path.rename(Path(str(log_path) + ".1"))
 
 
 # --------------------------------------------------------------------------
@@ -243,12 +262,14 @@ def style(text, name):
 
 
 def log(msg, color=None):
-    LOG_DIR.mkdir(exist_ok=True)
-    ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    line = f"[{ts}] {msg}"
-    print(style(line, color) if color else line)
-    with open(LOG_DIR / "orchestrator.log", "a") as f:
-        f.write(line + "\n")  # plain text on disk -- no escape codes in the log file
+    with _log_lock:
+        _rotate_log_file(LOG_DIR / "orchestrator.log")
+        LOG_DIR.mkdir(exist_ok=True)
+        ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        line = f"[{ts}] {msg}"
+        print(style(line, color) if color else line)
+        with open(LOG_DIR / "orchestrator.log", "a") as f:
+            f.write(line + "\n")  # plain text on disk -- no escape codes in the log file
 
 
 def notify(title, message):
@@ -382,8 +403,14 @@ def print_summary(state, todo_path, log_path=None):
     first_ts = None
     last_ts = None
 
-    if log_path.exists():
-        for line in log_path.read_text().splitlines():
+    paths_to_read = [log_path]
+    for i in range(1, LOG_BACKUP_COUNT + 1):
+        paths_to_read.append(Path(str(log_path) + f".{i}"))
+
+    for current_path in paths_to_read:
+        if not current_path.exists():
+            continue
+        for line in current_path.read_text().splitlines():
             if not line.startswith(f"[{today_str}"):
                 continue
             ts_str, _, msg = line.partition("] ")
@@ -1135,6 +1162,9 @@ def main():
     lint_todo(Path(config["todo_file"]))
     global _json_log_enabled
     _json_log_enabled = args.json_logs or config.get("json_logs", False)
+    global LOG_MAX_BYTES, LOG_BACKUP_COUNT
+    LOG_MAX_BYTES = config.get("log_max_bytes", 10 * 1024 * 1024)
+    LOG_BACKUP_COUNT = config.get("log_backup_count", 5)
 
     state = load_state()
     subprocess_timeout = config.get("subprocess_timeout", 180)
