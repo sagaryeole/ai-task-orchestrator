@@ -2,9 +2,9 @@
 
 ## Startup Errors
 
-### "config.json not found"
+### "Config file not found"
 
-Run `task-orchestrator init` to create starter files, or specify a path with `--config path/to/config.json`.
+Run `task-orchestrator init` to create starter files, or specify a path with `--config path/to/task-orchestrator.config.json`.
 
 ### "No enabled providers configured"
 
@@ -73,7 +73,7 @@ Handled automatically. The orchestrator detects `.ps1` commands and wraps them t
 
 ### "python: command not found" / "python3: command not found"
 
-Provider commands, `verify_commands`, and `stats_command` all auto-resolve between `python`, `python3`, and finally this process's own interpreter — whichever is actually on `PATH`. You shouldn't need to edit `config.json` to match your OS's naming convention; if you still see this error, the command you configured uses a different interpreter name entirely (e.g. a venv-specific path) that isn't resolvable at all.
+Provider commands, `verify_commands`, and `stats_command` all auto-resolve between `python`, `python3`, and finally this process's own interpreter — whichever is actually on `PATH`. You shouldn't need to edit `task-orchestrator.config.json` to match your OS's naming convention; if you still see this error, the command you configured uses a different interpreter name entirely (e.g. a venv-specific path) that isn't resolvable at all.
 
 ## Getting Help
 

@@ -1,3 +1,10 @@
+# This repo's own task-orchestrator.config*.json files are tracked
+# deliberately -- they're the dogfood config that drives this repo's own
+# Todo.md and carry no secrets (provider CLIs handle their own auth).
+# task_orchestrator.cli's `init` command still gitignores this filename
+# pattern by default in *other* projects that install the tool, since a
+# client project's provider `env` block commonly does hold real API keys.
+*.bak
 state.json
 orchestrator.pid
 logs/
@@ -7,5 +14,4 @@ __pycache__/
 *.pyc
 .DS_Store
 .claude/settings.local.json
-config.json.bak
 *.lock

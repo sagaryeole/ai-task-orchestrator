@@ -16,7 +16,7 @@ limits.
 Usage:
     python orchestrator.py
 
-Edit config.json to configure your providers, Todo file, and delay.
+Edit task-orchestrator.config.json to configure your providers, Todo file, and delay.
 """
 
 import subprocess
@@ -47,7 +47,8 @@ try:
 except ImportError:  # non-Windows
     msvcrt = None
 
-CONFIG_PATH = Path("config.json")
+DEFAULT_CONFIG_FILENAME = "task-orchestrator.config.json"
+CONFIG_PATH = Path(DEFAULT_CONFIG_FILENAME)
 STATE_PATH = Path("state.json")
 PID_PATH = Path("orchestrator.pid")
 LOG_DIR = Path("logs")
@@ -87,7 +88,7 @@ def _register_secrets(providers):
     """Record env values whose key looks like a credential, so log()/log_json()
     can redact them. Matched by key name (API_KEY, TOKEN, SECRET, ...), not by
     guessing at value shape -- a provider's env is the only place real secrets
-    enter this process, since config.json itself is never logged wholesale."""
+    enter this process, since the config file itself is never logged wholesale."""
     for p in providers:
         for k, v in p.env.items():
             if isinstance(v, str) and v and _SECRET_KEY_PATTERN.search(k):
@@ -157,7 +158,7 @@ def validate_config(config):
     errors = []
 
     if not isinstance(config, dict):
-        sys.exit("Config validation failed:\n  - config.json must be a JSON object (dict).")
+        sys.exit(f"Config validation failed:\n  - {DEFAULT_CONFIG_FILENAME} must be a JSON object (dict).")
 
     required_top = ["todo_file", "providers"]
     for key in required_top:
@@ -283,6 +284,19 @@ def lint_config(config):
                     "Set a real value before running."
                 )
 
+    if (
+        not config.get("require_manual_confirmation", True)
+        and config.get("auto_commit", False)
+        and not config.get("verify_commands")
+    ):
+        warnings.append(
+            "require_manual_confirmation is false and auto_commit is true, but "
+            "verify_commands is empty -- every task where the agent exits 0 and "
+            "touches a file will be auto-accepted and committed with no correctness "
+            "check at all. Add a real verify_commands gate (e.g. a test suite) or "
+            "set require_manual_confirmation back to true."
+        )
+
     for w in warnings:
         log(w, color="yellow")
 
@@ -325,7 +339,7 @@ def _deep_merge(base, override):
 def load_config(config_path=None):
     path = config_path or CONFIG_PATH
     if not path.exists():
-        sys.exit("config.json not found.")
+        sys.exit(f"Config file not found: {path}")
     config = json.loads(path.read_text())
 
     if GLOBAL_CONFIG_PATH.exists():
@@ -560,7 +574,7 @@ def _resolve_executable(executable, env=None):
 
     'python'/'python3' get an extra fallback: whichever name isn't on PATH
     falls back to the other, and finally to sys.executable (this process's
-    own interpreter, which always exists) -- config.json's default
+    own interpreter, which always exists) -- the default config's
     verify_commands and stats_command entries are plain 'python ...' strings,
     and only one of 'python'/'python3' is guaranteed to exist on any given
     OS/distro, so a literal name alone isn't portable.
@@ -964,7 +978,7 @@ def validate_git_working_tree(working_directory):
     if result.returncode != 0 or result.stdout.strip().lower() != "true":
         sys.exit(
             f"Fatal: '{working_directory}' is not inside a git working tree. "
-            "Set a valid 'working_directory' in config.json or run from inside a git repo."
+            f"Set a valid 'working_directory' in {DEFAULT_CONFIG_FILENAME} or run from inside a git repo."
         )
 
 
@@ -993,7 +1007,7 @@ class Provider:
       - Nvidia NIM endpoint via Kilo Code CLI (OpenAI-compatible base URL)
       - Local LM Studio server (OpenAI-compatible base URL, no API key)
 
-    Config shape (see config.json "providers" list):
+    Config shape (see task-orchestrator.config.json "providers" list):
     {
       "name": "openrouter-free",
       "command": "kilo --auto --model deepseek/deepseek-chat-v3-0324:free",
@@ -1225,7 +1239,7 @@ def load_providers(config, subprocess_timeout=None, stall_timeout=600):
         for p in config.get("providers", []) if p.get("enabled", True)
     ]
     if not providers:
-        sys.exit("No enabled providers configured in config.json.")
+        sys.exit(f"No enabled providers configured in {DEFAULT_CONFIG_FILENAME}.")
     return providers
 
 
@@ -1712,20 +1726,25 @@ _INIT_DEFAULT_PROMPT = (
 )
 
 _INIT_GITIGNORE_LINES = [
+    # The config file commonly holds provider API keys (directly or via env
+    # interpolation) -- gitignored by default so a real project's secrets
+    # can never land in git just because someone ran `init` and committed
+    # everything without thinking about it.
+    DEFAULT_CONFIG_FILENAME,
     "state.json", "orchestrator.pid", "logs/", "*.env", ".env",
     "__pycache__/", "*.pyc", "*.lock",
 ]
 
 
 def cmd_init(target_dir="."):
-    """Scaffold a new project: config.json, Todo.md, prompts/task_prompt.txt,
-    .gitignore. Never overwrites an existing file -- reports what it created
-    vs. what it left alone."""
+    """Scaffold a new project: task-orchestrator.config.json, Todo.md,
+    prompts/task_prompt.txt, .gitignore. Never overwrites an existing file --
+    reports what it created vs. what it left alone."""
     target = Path(target_dir)
     created, skipped = [], []
 
     files = {
-        target / "config.json": json.dumps(_INIT_DEFAULT_CONFIG, indent=2) + "\n",
+        target / DEFAULT_CONFIG_FILENAME: json.dumps(_INIT_DEFAULT_CONFIG, indent=2) + "\n",
         target / "Todo.md": _INIT_DEFAULT_TODO,
         target / "prompts" / "task_prompt.txt": _INIT_DEFAULT_PROMPT,
     }
@@ -1757,12 +1776,12 @@ def cmd_init(target_dir="."):
         log(f"init: created {c}", color="green")
     for s in skipped:
         log(f"init: skipped {s} (already exists)", color="dim")
-    log("init: done. Edit config.json to set your provider command(s), then run the orchestrator.", color="bold_green")
+    log(f"init: done. Edit {DEFAULT_CONFIG_FILENAME} to set your provider command(s), then run the orchestrator.", color="bold_green")
     return 0
 
 
 def cmd_validate(config_path):
-    """Check config.json structure, provider executables, git working tree,
+    """Check config structure, provider executables, git working tree,
     and todo_file -- without running anything. Returns 0 if everything
     checks out, 1 otherwise."""
     if not config_path.exists():
@@ -1775,7 +1794,7 @@ def cmd_validate(config_path):
         log(f"validate: {e}", color="bold_red")
         return 1
 
-    log("validate: config.json structure OK", color="green")
+    log("validate: config structure OK", color="green")
     ok = True
 
     lint_config(config)
@@ -1891,8 +1910,8 @@ def main():
              "Omit to run the normal task loop."
     )
     parser.add_argument(
-        "--config", default="config.json",
-        help="Path to config.json (default: config.json)"
+        "--config", default=DEFAULT_CONFIG_FILENAME,
+        help=f"Path to the config file (default: {DEFAULT_CONFIG_FILENAME})"
     )
     parser.add_argument(
         "--dry-run", action="store_true",

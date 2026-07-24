@@ -690,6 +690,33 @@ class TestLintConfig(unittest.TestCase):
             })
             self.assertEqual(output.strip(), "")
 
+    def test_warns_on_unattended_auto_commit_with_no_verification(self):
+        output = self._run_lint({
+            "require_manual_confirmation": False,
+            "auto_commit": True,
+            "verify_commands": [],
+            "providers": [{"name": "p", "command": "echo --auto", "env": {}, "rate_limit_patterns": []}],
+        })
+        self.assertIn("verify_commands is empty", output)
+
+    def test_no_warn_when_verify_commands_present(self):
+        output = self._run_lint({
+            "require_manual_confirmation": False,
+            "auto_commit": True,
+            "verify_commands": ["python -m unittest"],
+            "providers": [{"name": "p", "command": "echo --auto", "env": {}, "rate_limit_patterns": []}],
+        })
+        self.assertNotIn("verify_commands is empty", output)
+
+    def test_no_warn_on_unattended_no_verification_when_auto_commit_off(self):
+        output = self._run_lint({
+            "require_manual_confirmation": False,
+            "auto_commit": False,
+            "verify_commands": [],
+            "providers": [{"name": "p", "command": "echo --auto", "env": {}, "rate_limit_patterns": []}],
+        })
+        self.assertNotIn("verify_commands is empty", output)
+
 
 class TestLintTodo(unittest.TestCase):
     def _run_lint(self, content):
@@ -1541,14 +1568,17 @@ class TestInitCommand(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             result = cmd_init(tmpdir)
             self.assertEqual(result, 0)
-            self.assertTrue((Path(tmpdir) / "config.json").exists())
+            self.assertTrue((Path(tmpdir) / "task-orchestrator.config.json").exists())
             self.assertTrue((Path(tmpdir) / "Todo.md").exists())
             self.assertTrue((Path(tmpdir) / "prompts" / "task_prompt.txt").exists())
             self.assertTrue((Path(tmpdir) / ".gitignore").exists())
 
-            config = json.loads((Path(tmpdir) / "config.json").read_text())
+            config = json.loads((Path(tmpdir) / "task-orchestrator.config.json").read_text())
             self.assertIn("providers", config)
             self.assertIn("verify_commands", config)
+
+            gitignore = (Path(tmpdir) / ".gitignore").read_text()
+            self.assertIn("task-orchestrator.config.json", gitignore)
 
     def test_init_does_not_overwrite_existing_files(self):
         with tempfile.TemporaryDirectory() as tmpdir:
