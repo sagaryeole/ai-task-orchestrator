@@ -231,6 +231,7 @@ def load_state():
     else:
         state = {"provider_cooldowns": {}}
     state.setdefault("completed_task_durations", [])
+    state.setdefault("provider_rate_limit_counts", {})
     return state
 
 
@@ -647,10 +648,31 @@ class Provider:
         until = state["provider_cooldowns"].get(self.name, 0)
         return time.time() >= until
 
-    def mark_exhausted(self, state):
-        state["provider_cooldowns"][self.name] = time.time() + self.cooldown_seconds
+    def get_rate_limit_count(self, state):
+        return state.get("provider_rate_limit_counts", {}).get(self.name, 0)
+
+    def mark_exhausted(self, state, reason="rate_limited"):
+        counts = state.setdefault("provider_rate_limit_counts", {})
+        if reason == "rate_limited":
+            count = counts.get(self.name, 0) + 1
+            counts[self.name] = count
+            max_cooldown = self.cooldown_seconds * 64
+            backoff = min(self.cooldown_seconds * (2 ** (count - 1)), max_cooldown)
+            state["provider_cooldowns"][self.name] = time.time() + backoff
+            log(f"Provider '{self.name}' marked exhausted. Cooling down for {backoff}s (consecutive rate-limit hits: {count}).", color="yellow")
+        else:
+            if self.name in counts:
+                counts[self.name] = 0
+            state["provider_cooldowns"][self.name] = time.time() + self.cooldown_seconds
+            log(f"Provider '{self.name}' marked exhausted. Cooling down for {self.cooldown_seconds}s.", color="yellow")
         save_state(state)
-        log(f"Provider '{self.name}' marked exhausted. Cooling down for {self.cooldown_seconds}s.", color="yellow")
+
+    def reset_rate_limit_count(self, state):
+        counts = state.setdefault("provider_rate_limit_counts", {})
+        if self.name in counts and counts[self.name] != 0:
+            counts[self.name] = 0
+            save_state(state)
+            log(f"Provider '{self.name}' rate-limit counter reset (provider responded without rate-limiting).", color="dim")
 
     def run(self, prompt: str, working_directory: str, task_timeout=None):
         """Run this provider's command with the prompt on stdin.
@@ -1302,10 +1324,12 @@ def main():
                     + (" (looked rate-limited)" if rate_limited else ""), color=exit_color)
 
                 if rate_limited:
-                    provider.mark_exhausted(state)
+                    provider.mark_exhausted(state, reason="rate_limited")
                     log_json("provider_exhausted", provider=provider.name, reason="rate_limited")
                     log(f"Providers: {print_provider_status(providers, state)}", color="blue")
                     break  # stop retrying this provider, rotate to next
+                else:
+                    provider.reset_rate_limit_count(state)
 
                 if exit_code == 124:
                     # Timed out -- we already know it didn't finish, so there's
@@ -1344,7 +1368,7 @@ def main():
                     elif answer == "retry":
                         continue
                     elif answer == "skip-provider":
-                        provider.mark_exhausted(state)
+                        provider.mark_exhausted(state, reason="skip")
                         log(f"Providers: {print_provider_status(providers, state)}", color="blue")
                         break
                     elif answer == "skip-task":
@@ -1366,6 +1390,7 @@ def main():
                     # non-rate-limit failure: retry same provider up to max_retries_per_provider
 
             if attempt_success:
+                provider.reset_rate_limit_count(state)
                 mark_complete(todo_path, task)
                 duration = time.time() - task_start_time
                 durations = state.get("completed_task_durations", [])

@@ -163,6 +163,105 @@ class TestProviderAvailability(unittest.TestCase):
                 self.assertIn("p", state["provider_cooldowns"])
 
 
+class TestExponentialBackoff(unittest.TestCase):
+    def test_first_rate_limit_uses_base_cooldown(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_path = Path(tmpdir) / "state.json"
+            with patch('orchestrator.STATE_PATH', state_path):
+                p = Provider({"name": "p", "command": "echo", "env": {}, "rate_limit_patterns": [], "cooldown_seconds": 600})
+                state = {"provider_cooldowns": {}}
+                p.mark_exhausted(state, reason="rate_limited")
+                until = state["provider_cooldowns"]["p"]
+                expected = time.time() + 600
+                self.assertAlmostEqual(until, expected, delta=1)
+
+    def test_second_rate_limit_doubles_cooldown(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_path = Path(tmpdir) / "state.json"
+            with patch('orchestrator.STATE_PATH', state_path):
+                p = Provider({"name": "p", "command": "echo", "env": {}, "rate_limit_patterns": [], "cooldown_seconds": 600})
+                state = {"provider_cooldowns": {}}
+                p.mark_exhausted(state, reason="rate_limited")
+                p.mark_exhausted(state, reason="rate_limited")
+                until = state["provider_cooldowns"]["p"]
+                expected = time.time() + 1200
+                self.assertAlmostEqual(until, expected, delta=1)
+
+    def test_third_rate_limit_quadruples_cooldown(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_path = Path(tmpdir) / "state.json"
+            with patch('orchestrator.STATE_PATH', state_path):
+                p = Provider({"name": "p", "command": "echo", "env": {}, "rate_limit_patterns": [], "cooldown_seconds": 600})
+                state = {"provider_cooldowns": {}}
+                for _ in range(3):
+                    p.mark_exhausted(state, reason="rate_limited")
+                until = state["provider_cooldowns"]["p"]
+                expected = time.time() + 2400
+                self.assertAlmostEqual(until, expected, delta=1)
+
+    def test_backoff_capped_at_max(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_path = Path(tmpdir) / "state.json"
+            with patch('orchestrator.STATE_PATH', state_path):
+                p = Provider({"name": "p", "command": "echo", "env": {}, "rate_limit_patterns": [], "cooldown_seconds": 600})
+                state = {"provider_cooldowns": {}}
+                for _ in range(10):
+                    p.mark_exhausted(state, reason="rate_limited")
+                until = state["provider_cooldowns"]["p"]
+                max_expected = time.time() + 600 * 64
+                self.assertLessEqual(until, max_expected + 1)
+
+    def test_skip_provider_uses_fixed_cooldown(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_path = Path(tmpdir) / "state.json"
+            with patch('orchestrator.STATE_PATH', state_path):
+                p = Provider({"name": "p", "command": "echo", "env": {}, "rate_limit_patterns": [], "cooldown_seconds": 600})
+                state = {"provider_cooldowns": {}}
+                p.mark_exhausted(state, reason="rate_limited")
+                p.mark_exhausted(state, reason="rate_limited")
+                p.mark_exhausted(state, reason="skip")
+                until = state["provider_cooldowns"]["p"]
+                # After 2 rate-limits (1200s) + skip (600s), should be the skip cooldown
+                expected = time.time() + 600
+                self.assertAlmostEqual(until, expected, delta=1)
+
+    def test_reset_rate_limit_count(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_path = Path(tmpdir) / "state.json"
+            with patch('orchestrator.STATE_PATH', state_path):
+                p = Provider({"name": "p", "command": "echo", "env": {}, "rate_limit_patterns": [], "cooldown_seconds": 600})
+                state = {"provider_cooldowns": {}}
+                p.mark_exhausted(state, reason="rate_limited")
+                p.mark_exhausted(state, reason="rate_limited")
+                self.assertEqual(p.get_rate_limit_count(state), 2)
+                p.reset_rate_limit_count(state)
+                self.assertEqual(p.get_rate_limit_count(state), 0)
+
+    def test_rate_limit_count_persists_in_state(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_path = Path(tmpdir) / "state.json"
+            with patch('orchestrator.STATE_PATH', state_path):
+                p = Provider({"name": "p", "command": "echo", "env": {}, "rate_limit_patterns": [], "cooldown_seconds": 600})
+                state = {"provider_cooldowns": {}}
+                p.mark_exhausted(state, reason="rate_limited")
+                p.mark_exhausted(state, reason="rate_limited")
+                self.assertEqual(state["provider_rate_limit_counts"]["p"], 2)
+
+    def test_backward_compat_without_rate_limit_counts(self):
+        p = Provider({"name": "p", "command": "echo", "env": {}, "rate_limit_patterns": [], "cooldown_seconds": 600})
+        state = {"provider_cooldowns": {}}
+        self.assertEqual(p.get_rate_limit_count(state), 0)
+        p.mark_exhausted(state, reason="rate_limited")
+        self.assertEqual(p.get_rate_limit_count(state), 1)
+
+
 class TestValidateConfig(unittest.TestCase):
     def test_valid(self):
         cfg = {"todo_file": "Todo.md", "providers": [{"name": "a", "command": "cmd"}]}

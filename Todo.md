@@ -32,7 +32,7 @@ Grouped by priority — work top section first.
 - [x] Retry transient git command failures once after a short delay (e.g. `index.lock` contention) instead of treating them as hard failures — dogfooding runs kilo against this repo's own working tree, so the orchestrator's own `git diff`/`git commit`/`git status` calls can genuinely race with the agent's own git usage
 - [x] Rotate/cap `logs/orchestrator.log` and `.jsonl` once they pass a size threshold (e.g. 10MB) instead of growing unbounded across a long-lived or multi-day run
 - [x] File-lock `Todo.md` writes (`mark_complete`/`defer_task`) so two orchestrator processes accidentally pointed at the same `Todo.md` can't interleave writes and corrupt it
-- [ ] Exponential backoff on repeated rate-limit hits from the same provider instead of always reusing the same fixed `cooldown_seconds` — a provider that keeps getting rate-limited should back off longer each time, not retry at a fixed cadence forever
+- [x] Exponential backoff on repeated rate-limit hits from the same provider instead of always reusing the same fixed `cooldown_seconds` — a provider that keeps getting rate-limited should back off longer each time, not retry at a fixed cadence forever
 - [ ] Validate at startup that `working_directory` is actually inside a git working tree (`git rev-parse --is-inside-work-tree`) and fail fast with a clear message, instead of every `git diff`/`git commit` call quietly no-op'ing or erroring deep inside the task loop
 
 ## P2 — Nice-to-have / Polish
