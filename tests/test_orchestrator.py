@@ -304,6 +304,113 @@ class TestSuspiciousCompletion(unittest.TestCase):
             self.assertIn("- [x] Task one", final_text)
 
 
+class TestRateLimitFalsePositive(unittest.TestCase):
+    """Regression tests for the false-positive rate-limit detection fix.
+
+    rate_limited was decided by a plain substring match over the whole CLI output,
+    so task/code text mentioning "rate limit", "429", or "quota" (routine domain
+    vocabulary in this repo) discarded genuinely finished work and re-sent the
+    same task after a cooldown. The fix only trusts the match when git diff --stat
+    shows no real changes happened.
+    """
+
+    def test_false_positive_rate_limit_not_exhausted_when_files_changed(self):
+        from unittest.mock import patch
+        from orchestrator import main
+        import subprocess as sp
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sp.run(["git", "init", "-q"], cwd=tmpdir)
+            (Path(tmpdir) / "existing.txt").write_text("baseline\n")
+            sp.run(["git", "add", "-A"], cwd=tmpdir)
+            sp.run(["git", "commit", "-q", "-m", "baseline"], cwd=tmpdir)
+
+            todo = Path(tmpdir) / "Todo.md"
+            todo.write_text("- [ ] Task one\n")
+            cfg_path = Path(tmpdir) / "config.json"
+            write_cmd = (
+                f"python3 -c \"import os; open('{tmpdir}/existing.txt', 'w').write('changed'); "
+                "print('rate limit from model')\""
+            )
+            cfg_path.write_text(json.dumps({
+                "todo_file": str(todo),
+                "working_directory": tmpdir,
+                "require_manual_confirmation": False,
+                "providers": [{
+                    "name": "p",
+                    "command": write_cmd,
+                    "env": {},
+                    "rate_limit_patterns": ["rate limit"]
+                }],
+            }))
+            state_path = Path(tmpdir) / "state.json"
+            state_path.write_text(json.dumps({"provider_cooldowns": {}}))
+
+            with patch.object(sys, 'argv', ['orchestrator.py', '--config', str(cfg_path), '--once']):
+                with patch('orchestrator.STATE_PATH', state_path):
+                    with patch('orchestrator.time.sleep'):
+                        with patch('orchestrator.log') as mock_log:
+                            main()
+
+            log_output = ' '.join(str(call.args[0]) for call in mock_log.call_args_list)
+            self.assertNotIn("marked exhausted", log_output)
+            self.assertIn("Task marked complete", log_output)
+            final_text = todo.read_text()
+            self.assertIn("- [x] Task one", final_text)
+            state = json.loads(state_path.read_text())
+            self.assertNotIn("p", state["provider_cooldowns"])
+
+    def test_true_rate_limit_is_still_exhausted_when_no_files_changed(self):
+        from unittest.mock import patch
+        from orchestrator import main
+        import subprocess as sp
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sp.run(["git", "init", "-q"], cwd=tmpdir)
+
+            todo = Path(tmpdir) / "Todo.md"
+            todo.write_text("- [ ] Task one\n")
+            cfg_path = Path(tmpdir) / "config.json"
+            # Output contains "rate limit" but makes NO file changes.
+            cmd = "python3 -c \"print('rate limit exceeded')\""
+            cfg_path.write_text(json.dumps({
+                "todo_file": str(todo),
+                "working_directory": tmpdir,
+                "require_manual_confirmation": False,
+                "continue_on_failure": True,
+                "providers": [
+                    {
+                        "name": "limited-p",
+                        "command": cmd,
+                        "env": {},
+                        "rate_limit_patterns": ["rate limit"]
+                    },
+                    {
+                        "name": "fail-p",
+                        "command": "false",
+                        "env": {},
+                        "rate_limit_patterns": []
+                    },
+                ],
+            }))
+            state_path = Path(tmpdir) / "state.json"
+            state_path.write_text(json.dumps({"provider_cooldowns": {}}))
+
+            with patch.object(sys, 'argv', ['orchestrator.py', '--config', str(cfg_path), '--once']):
+                with patch('orchestrator.STATE_PATH', state_path):
+                    with patch('orchestrator.time.sleep'):
+                        with patch('orchestrator.log') as mock_log:
+                            main()
+
+            log_output = ' '.join(str(call.args[0]) for call in mock_log.call_args_list)
+            self.assertIn("marked exhausted", log_output)
+            self.assertIn("limited-p", log_output)
+            state = json.loads(state_path.read_text())
+            self.assertIn("limited-p", state["provider_cooldowns"])
+            final_text = todo.read_text()
+            self.assertIn("- [ ] Task one", final_text)
+
+
 class TestVerifyLiveOutput(unittest.TestCase):
     def test_verify_prints_to_stderr(self):
         import io
