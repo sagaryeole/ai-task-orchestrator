@@ -6,9 +6,9 @@
   "subprocess_timeout": null,
   "stall_timeout_seconds": 600,
   "max_retries_per_provider": 1,
-  "require_manual_confirmation": true,
+  "require_manual_confirmation": false,
   "continue_on_failure": true,
-  "auto_commit": false,
+  "auto_commit": true,
   "verify_commands": ["python3 -m unittest discover -s tests"],
 
   "providers": [

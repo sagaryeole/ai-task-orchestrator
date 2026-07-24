@@ -657,6 +657,14 @@ def main():
                 verified = run_verification(config)
 
                 if require_confirmation:
+                    diff_stat = subprocess.run(
+                        ["git", "diff", "--stat"],
+                        cwd=working_directory, capture_output=True, text=True, timeout=2,
+                    )
+                    if diff_stat.returncode == 0:
+                        stat_output = diff_stat.stdout.strip()
+                        if stat_output:
+                            log("Working tree changes (git diff --stat):\n" + stat_output, color="yellow")
                     answer = input(
                         style(f"\nTask '{task}' via '{provider.name}' — mark complete? (y/n/retry/skip-provider/skip-task): ", "bold_cyan")
                     ).strip().lower()
