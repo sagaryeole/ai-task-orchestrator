@@ -42,4 +42,4 @@ Grouped by priority — work top section first.
 - [x] Add a `--skip-section "Section Name"` flag to exclude non-actionable sections (e.g. a manual QA/"Go-Live Verification Checklist") from being picked up as tasks at all
 
 - [x] Minimal local dashboard via stdlib `http.server` serving current run state (current task, provider status, recent history) as JSON/HTML — replaces the "no live dashboard" limitation without adding a dependency
-- [ ] Shell out to the provider's own stats command after each task (e.g. `kilo stats`) and log cost/token usage per task, where the CLI supports it
+- [x] Shell out to the provider's own stats command after each task (e.g. `kilo stats`) and log cost/token usage per task, where the CLI supports it
