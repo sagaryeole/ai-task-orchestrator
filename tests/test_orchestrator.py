@@ -369,6 +369,8 @@ class TestSuspiciousCompletion(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir:
             sp.run(["git", "init", "-q"], cwd=tmpdir)
+            sp.run(["git", "config", "user.email", "tests@example.com"], cwd=tmpdir)
+            sp.run(["git", "config", "user.name", "Tests"], cwd=tmpdir)
             # git status --porcelain (used to detect a real completion) sees
             # untracked files too, so the test's own scaffolding must be
             # committed as a clean baseline first, same as a real checkout
@@ -412,6 +414,8 @@ class TestSuspiciousCompletion(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir:
             sp.run(["git", "init", "-q"], cwd=tmpdir)
+            sp.run(["git", "config", "user.email", "tests@example.com"], cwd=tmpdir)
+            sp.run(["git", "config", "user.name", "Tests"], cwd=tmpdir)
             (Path(tmpdir) / "existing.txt").write_text("baseline\n")
             sp.run(["git", "add", "-A"], cwd=tmpdir)
             sp.run(["git", "commit", "-q", "-m", "baseline"], cwd=tmpdir)
@@ -462,6 +466,8 @@ class TestRateLimitFalsePositive(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir:
             sp.run(["git", "init", "-q"], cwd=tmpdir)
+            sp.run(["git", "config", "user.email", "tests@example.com"], cwd=tmpdir)
+            sp.run(["git", "config", "user.name", "Tests"], cwd=tmpdir)
             (Path(tmpdir) / "existing.txt").write_text("baseline\n")
             sp.run(["git", "add", "-A"], cwd=tmpdir)
             sp.run(["git", "commit", "-q", "-m", "baseline"], cwd=tmpdir)
@@ -511,6 +517,8 @@ class TestRateLimitFalsePositive(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir:
             sp.run(["git", "init", "-q"], cwd=tmpdir)
+            sp.run(["git", "config", "user.email", "tests@example.com"], cwd=tmpdir)
+            sp.run(["git", "config", "user.name", "Tests"], cwd=tmpdir)
             # git status --porcelain (used to confirm the rate-limit signal)
             # sees untracked files too, so commit the test's own scaffolding
             # as a clean baseline first -- same reasoning as the sibling
