@@ -115,6 +115,37 @@ _INTERACTIVE_LAUNCHERS = {
 }
 
 
+def lint_todo(todo_path: Path):
+    """Warn about duplicate section headers and duplicate task lines in Todo.md."""
+    if not todo_path.exists():
+        return
+    text = todo_path.read_text()
+    lines = text.splitlines()
+
+    headers = []
+    tasks = []
+    for line in lines:
+        stripped = line.strip()
+        if re.match(r"^#{1,6}\s+.+", stripped):
+            headers.append(stripped)
+        elif re.match(r"^- \[ \] .+", stripped):
+            tasks.append(stripped)
+
+    seen = {}
+    for header in headers:
+        seen[header] = seen.get(header, 0) + 1
+    for line, count in seen.items():
+        if count > 1:
+            log(f"Todo.md linter: duplicate section header ({count}x): {line}", color="yellow")
+
+    seen = {}
+    for task in tasks:
+        seen[task] = seen.get(task, 0) + 1
+    for line, count in seen.items():
+        if count > 1:
+            log(f"Todo.md linter: duplicate task line ({count}x): {line}", color="yellow")
+
+
 def lint_config(config):
     """Warn about common config pitfalls that would silently break unattended runs."""
     warnings = []
@@ -633,6 +664,7 @@ def main():
 
     config = load_config(Path(args.config))
     lint_config(config)
+    lint_todo(Path(config["todo_file"]))
     global _json_log_enabled
     _json_log_enabled = args.json_logs or config.get("json_logs", False)
 

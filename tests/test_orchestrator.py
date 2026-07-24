@@ -21,6 +21,7 @@ from orchestrator import (
     git_commit,
     run_verification,
     lint_config,
+    lint_todo,
     STATE_PATH,
 )
 
@@ -315,6 +316,40 @@ class TestLintConfig(unittest.TestCase):
                 ],
             })
             self.assertEqual(output.strip(), "")
+
+
+class TestLintTodo(unittest.TestCase):
+    def _run_lint(self, content):
+        from unittest.mock import patch
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
+            f.write(content)
+            path = f.name
+        try:
+            with patch('orchestrator.log') as mock_log:
+                lint_todo(Path(path))
+            return ' '.join(str(call.args[0]) for call in mock_log.call_args_list)
+        finally:
+            os.unlink(path)
+
+    def test_warns_on_duplicate_headers(self):
+        output = self._run_lint("## Section\n## Section\n")
+        self.assertIn("duplicate section header", output)
+        self.assertIn("2x", output)
+
+    def test_warns_on_duplicate_tasks(self):
+        output = self._run_lint("- [ ] Task A\n- [ ] Task A\n")
+        self.assertIn("duplicate task line", output)
+        self.assertIn("2x", output)
+
+    def test_no_warn_on_unique(self):
+        output = self._run_lint("- [ ] Task A\n- [ ] Task B\n")
+        self.assertNotIn("duplicate", output)
+
+    def test_no_warn_on_missing_file(self):
+        from unittest.mock import patch
+        with patch('orchestrator.log') as mock_log:
+            lint_todo(Path("/nonexistent/path/Todo.md"))
+        self.assertEqual(mock_log.call_count, 0)
 
 
 if __name__ == "__main__":
