@@ -495,7 +495,7 @@ def _process_group_cpu_percent(pgid):
     try:
         result = subprocess.run(
             ["ps", "-A", "-o", "pid=,pgid=,%cpu="],
-            capture_output=True, text=True, timeout=2,
+            capture_output=True, text=True, errors="replace", timeout=2,
         )
     except Exception:
         return None
@@ -522,7 +522,7 @@ def _git_dirty_count(working_directory):
     try:
         result = subprocess.run(
             ["git", "status", "--porcelain"],
-            cwd=working_directory, capture_output=True, text=True, timeout=2,
+            cwd=working_directory, capture_output=True, text=True, errors="replace", timeout=2,
         )
     except Exception:
         return None
@@ -592,6 +592,7 @@ class Provider:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                errors="replace",
                 cwd=working_directory,
                 env=env,
                 start_new_session=True,
@@ -976,7 +977,7 @@ def run_verification(config):
         log(f"Verifying: {cmd}", color="cyan")
         result = subprocess.run(
             cmd, shell=True, cwd=config.get("working_directory", "."),
-            capture_output=True, text=True,
+            capture_output=True, text=True, errors="replace",
         )
         if result.returncode != 0:
             failure_msg = f"Verification FAILED: {cmd}\n{result.stdout}\n{result.stderr}"
@@ -992,7 +993,7 @@ def git_commit(config, task: str):
     wd = config.get("working_directory", ".")
     check = subprocess.run(
         ["git", "status", "--porcelain"], cwd=wd,
-        capture_output=True, text=True,
+        capture_output=True, text=True, errors="replace",
     )
     if not check.stdout.strip():
         log("No changes to commit. Skipping git commit.", color="dim")
@@ -1014,6 +1015,7 @@ def run_provider_stats(provider, working_directory: str, task: str):
             env={**os.environ, **provider.env},
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=30,
         )
     except FileNotFoundError:
@@ -1217,7 +1219,7 @@ def main():
                 # exhaustion event.
                 diff_stat = subprocess.run(
                     ["git", "diff", "--stat"],
-                    cwd=working_directory, capture_output=True, text=True, timeout=2,
+                    cwd=working_directory, capture_output=True, text=True, errors="replace", timeout=2,
                 )
                 stat_output = diff_stat.stdout.strip() if diff_stat.returncode == 0 else ""
                 rate_limited = rate_limited and not stat_output

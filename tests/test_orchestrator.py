@@ -1007,5 +1007,48 @@ class TestDashboardServer(unittest.TestCase):
             server.shutdown()
 
 
+class TestNonUTF8Output(unittest.TestCase):
+    """Non-UTF-8 bytes in a provider CLI's stdout/stderr should not crash
+    the orchestrator — errors="replace" on subprocess calls prevents
+    UnicodeDecodeError from propagating."""
+
+    def test_provider_run_with_non_utf8_bytes(self):
+        """A provider command that emits non-UTF-8 bytes should return
+        a valid result rather than raising UnicodeDecodeError."""
+        from unittest.mock import patch
+        from orchestrator import Provider
+
+        # A command that writes raw non-UTF-8 bytes to stdout
+        cmd = "python3 -c \"import sys; sys.stdout.buffer.write(b'\\xff\\xfe hello')\""
+        cfg = {
+            "name": "nonutf8-p",
+            "command": cmd,
+            "env": {},
+            "rate_limit_patterns": [],
+        }
+        p = Provider(cfg)
+        exit_code, output, rate_limited = p.run("test prompt", "/tmp")
+        # Should not crash — the bad bytes are replaced, not raised
+        self.assertIsInstance(output, str)
+        self.assertIn("hello", output)
+
+    def test_provider_run_with_non_utf8_stderr(self):
+        """Non-UTF-8 bytes on stderr should also be handled gracefully."""
+        from unittest.mock import patch
+        from orchestrator import Provider
+
+        cmd = "python3 -c \"import sys; sys.stderr.buffer.write(b'\\xff malformed')\""
+        cfg = {
+            "name": "nonutf8-stderr",
+            "command": cmd,
+            "env": {},
+            "rate_limit_patterns": [],
+        }
+        p = Provider(cfg)
+        exit_code, output, rate_limited = p.run("test prompt", "/tmp")
+        self.assertIsInstance(output, str)
+        self.assertIn("malformed", output)
+
+
 if __name__ == "__main__":
     unittest.main()
