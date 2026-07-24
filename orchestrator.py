@@ -251,6 +251,24 @@ def log(msg, color=None):
         f.write(line + "\n")  # plain text on disk -- no escape codes in the log file
 
 
+def notify(title, message):
+    """Fire-and-forget desktop notification. Uses osascript on macOS,
+    notify-send on Linux when available, otherwise silently does nothing."""
+    try:
+        if sys.platform == "darwin":
+            subprocess.run(
+                ["osascript", "-e", f'display notification "{message}" with title "{title}"'],
+                capture_output=True, timeout=5,
+            )
+        elif sys.platform.startswith("linux"):
+            subprocess.run(
+                ["notify-send", title, message],
+                capture_output=True, timeout=5,
+            )
+    except Exception:
+        pass
+
+
 # --------------------------------------------------------------------------
 # Todo handling
 # --------------------------------------------------------------------------
@@ -589,6 +607,7 @@ class Provider:
             if stalled:
                 log(f"Provider '{self.name}' looks stalled -- no CPU activity or file changes for "
                     f"{self.stall_timeout}s despite still running. Killing and treating as failed.", color="bold_red")
+                notify("Provider stalled", f"{self.name} stalled after {self.stall_timeout}s of inactivity")
                 log_json("provider_stalled", provider=self.name, stall_timeout=self.stall_timeout)
                 return 124, f"Stalled: no activity for {self.stall_timeout}s", False
             label = f"{effective_timeout}s" if effective_timeout is not None else "the configured limit"
@@ -784,6 +803,7 @@ def main():
         if not tasks:
             print_progress(todo_path, state)
             log("All tasks completed. Exiting.", color="bold_green")
+            notify("All tasks completed", "All tasks in Todo.md are done")
             break
 
         task = tasks[0]
@@ -805,6 +825,7 @@ def main():
             if provider is None:
                 wait_s = seconds_until_next_available(providers, state)
                 log(f"All providers exhausted. Sleeping {wait_s}s until one frees up...", color="yellow")
+                notify("All providers exhausted", f"Sleeping {wait_s}s until a provider is available")
                 time.sleep(wait_s + 1)
                 continue  # re-check availability
 
@@ -836,6 +857,7 @@ def main():
                 verified = run_verification(config)
 
                 if require_confirmation:
+                    notify("Task needs confirmation", f"Task: {task}\nProvider: {provider.name}")
                     diff_stat = subprocess.run(
                         ["git", "diff", "--stat"],
                         cwd=working_directory, capture_output=True, text=True, timeout=2,
@@ -890,6 +912,7 @@ def main():
                 log_json("task_failed", task=task, provider=provider.name)
                 if not config.get("continue_on_failure", True):
                     log("Stopping (continue_on_failure=false).", color="bold_red")
+                    notify("Orchestrator stopped", f"Task failed: {task}\ncontinue_on_failure=false")
                     log_json("stop")
                     return
                 # Defer it to the end, still unchecked, rather than leaving it at

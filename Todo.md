@@ -37,7 +37,7 @@ Grouped by priority — work top section first.
 - [x] Add a minimal live status view (e.g. print a one-line summary of provider cooldown states on startup and after each rotation)
 - [x] Persistent one-line status footer (Claude Code style) showing provider, task N/total, elapsed, cpu%, files changed — kept separate from the scrolling task log rather than mixed into it
 - [x] Progress + ETA: "Task 14/202 (7%), ~3h remaining" based on a rolling average of completed task durations
-- [ ] Desktop notification (e.g. `osascript -e 'display notification'` on macOS, no new deps) when a task needs manual confirmation or the run stalls/finishes, so long runs don't require babysitting the terminal
+- [x] Desktop notification (e.g. `osascript -e 'display notification'` on macOS, no new deps) when a task needs manual confirmation or the run stalls/finishes, so long runs don't require babysitting the terminal
 - [ ] Add a `--summary` flag (rtk-gain style): tasks completed today, success/fail rate, total run time, average time per task
 - [ ] Add a `--skip-section "Section Name"` flag to exclude non-actionable sections (e.g. a manual QA/"Go-Live Verification Checklist") from being picked up as tasks at all
 - [ ] Shell out to the provider's own stats command after each task (e.g. `kilo stats`) and log cost/token usage per task, where the CLI supports it
