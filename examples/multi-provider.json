@@ -1,0 +1,43 @@
+{
+  "_comment": "Multi-provider setup: Claude primary, Copilot fallback, local Ollama last resort",
+  "todo_file": "Todo.md",
+  "working_directory": ".",
+  "prompt_template": "prompts/task_prompt.txt",
+  "delay_seconds": 45,
+  "subprocess_timeout": null,
+  "stall_timeout_seconds": 600,
+  "max_retries_per_provider": 1,
+  "require_manual_confirmation": false,
+  "continue_on_failure": true,
+  "auto_commit": true,
+  "verify_commands": ["python -m pytest tests/ -x -q"],
+  "providers": [
+    {
+      "name": "claude",
+      "enabled": true,
+      "command": "claude --no-interactive --print",
+      "env": {"ANTHROPIC_API_KEY": "$ANTHROPIC_API_KEY"},
+      "rate_limit_patterns": ["rate limit", "429", "overloaded"],
+      "cooldown_seconds": 600,
+      "priority": 10
+    },
+    {
+      "name": "copilot",
+      "enabled": true,
+      "command": "copilot --allow-all-tools --no-ask-user -s -p {{TASK}}",
+      "env": {},
+      "rate_limit_patterns": ["rate limit", "429", "too many requests"],
+      "cooldown_seconds": 300,
+      "priority": 5
+    },
+    {
+      "name": "ollama-local",
+      "enabled": true,
+      "command": "ollama run codellama",
+      "env": {},
+      "rate_limit_patterns": [],
+      "cooldown_seconds": 60,
+      "priority": 1
+    }
+  ]
+}

@@ -1,0 +1,58 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "task-orchestrator"
+version = "2.0.0"
+description = "AI-agnostic orchestrator that drives coding-agent CLIs through a task backlog with rate-limit-aware provider rotation."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.9"
+authors = [{ name = "Task Orchestrator Contributors" }]
+keywords = ["ai", "orchestrator", "coding-agent", "automation", "cli", "llm", "copilot", "claude", "codex"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Build Tools",
+    "Topic :: Software Development :: Quality Assurance",
+    "Typing :: Typed",
+]
+
+[project.scripts]
+task-orchestrator = "task_orchestrator.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/sagaryeole/ai-task-orchestrator"
+Repository = "https://github.com/sagaryeole/ai-task-orchestrator"
+Issues = "https://github.com/sagaryeole/ai-task-orchestrator/issues"
+Documentation = "https://github.com/sagaryeole/ai-task-orchestrator#readme"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/task_orchestrator"]
+
+[tool.ruff]
+target-version = "py39"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "A", "S", "T20", "SIM", "TCH"]
+ignore = ["S603", "S607", "S404"]  # subprocess calls are intentional
+
+[tool.mypy]
+python_version = "3.9"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

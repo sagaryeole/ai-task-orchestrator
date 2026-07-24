@@ -1,0 +1,139 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Task Orchestrator Configuration",
+  "description": "Configuration file for task-orchestrator (https://github.com/sagaryeole/ai-task-orchestrator)",
+  "type": "object",
+  "required": ["todo_file", "providers"],
+  "properties": {
+    "todo_file": {
+      "type": "string",
+      "description": "Path to the markdown task list file"
+    },
+    "working_directory": {
+      "type": "string",
+      "default": ".",
+      "description": "Working directory for agent CLI and verification commands"
+    },
+    "prompt_template": {
+      "type": "string",
+      "default": "prompts/task_prompt.txt",
+      "description": "Path to the prompt template file (must contain {{TASK}})"
+    },
+    "delay_seconds": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 60,
+      "description": "Pause between successfully completed tasks"
+    },
+    "subprocess_timeout": {
+      "type": ["integer", "null"],
+      "default": null,
+      "description": "Wall-clock timeout per task in seconds (null = no limit)"
+    },
+    "stall_timeout_seconds": {
+      "type": "integer",
+      "minimum": 10,
+      "default": 600,
+      "description": "Activity-based timeout — kills task only if no CPU/file activity for this long"
+    },
+    "max_retries_per_provider": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1,
+      "description": "Retry attempts per provider on non-rate-limit failures"
+    },
+    "require_manual_confirmation": {
+      "type": "boolean",
+      "default": false,
+      "description": "If true, prompt for approval after each task attempt"
+    },
+    "continue_on_failure": {
+      "type": "boolean",
+      "default": true,
+      "description": "If false, stop on the first task that cannot be completed"
+    },
+    "on_failure": {
+      "type": "string",
+      "enum": ["skip", "defer", "stop"],
+      "default": "skip",
+      "description": "Behavior when a task fails: skip (leave unchecked, move on), defer (move to end of file), stop (halt orchestrator)"
+    },
+    "auto_commit": {
+      "type": "boolean",
+      "default": true,
+      "description": "Automatically git commit after each completed task"
+    },
+    "verify_commands": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": [],
+      "description": "Shell commands that must all exit 0 for a task to be verified"
+    },
+    "subprocess_timeout_overrides": {
+      "type": "object",
+      "additionalProperties": { "type": "integer" },
+      "description": "Per-tag timeout overrides, e.g. {\"[big]\": 900}"
+    },
+    "json_logs": {
+      "type": "boolean",
+      "default": false,
+      "description": "Enable structured JSON log output"
+    },
+    "log_max_bytes": {
+      "type": "integer",
+      "default": 10485760
+    },
+    "log_backup_count": {
+      "type": "integer",
+      "default": 5
+    },
+    "dashboard_port": {
+      "type": ["integer", "null"],
+      "default": null,
+      "description": "Port for the local status dashboard (null = disabled)"
+    },
+    "dashboard_retry_on_port_in_use": {
+      "type": "boolean",
+      "default": true
+    },
+    "open_dashboard_in_browser": {
+      "type": "boolean",
+      "default": false
+    },
+    "interactive_commands": {
+      "type": "boolean",
+      "default": false,
+      "description": "Enable p/s/q/r keyboard commands during runs"
+    },
+    "flair_mode": { "type": "boolean", "default": false },
+    "ascii_progress": { "type": "boolean", "default": false },
+    "provider_glyphs": { "type": "boolean", "default": false },
+    "audio_notifications": { "type": "boolean", "default": false },
+    "providers": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "command"],
+        "properties": {
+          "name": { "type": "string", "description": "Unique provider identifier" },
+          "enabled": { "type": "boolean", "default": true },
+          "command": { "type": "string", "description": "CLI command (use {{TASK}} for arg-based prompt)" },
+          "env": {
+            "type": "object",
+            "additionalProperties": { "type": "string" },
+            "description": "Environment variables (supports $VAR interpolation)"
+          },
+          "rate_limit_patterns": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Lowercase substrings indicating rate-limit in CLI output"
+          },
+          "cooldown_seconds": { "type": "integer", "minimum": 0, "default": 600 },
+          "priority": { "type": "integer", "default": 0 },
+          "stats_command": { "type": ["string", "null"], "default": null }
+        }
+      }
+    }
+  }
+}

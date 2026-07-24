@@ -1,6 +1,71 @@
 # Task Orchestrator
 
-A small, AI-agnostic orchestrator that drives a coding-agent CLI (Kilo Code, Claude Code, Codex, or similar) through a backlog of tasks one at a time, with rate-limit-aware pacing and automatic fallback across multiple providers/models.
+<p align="center">
+  <img src="docs/assets/logo.svg" alt="Task Orchestrator logo" width="100%" />
+</p>
+
+<p align="center">
+  <strong>Run AI coding backlogs unattended with provider failover, verification gates, and zero telemetry.</strong>
+</p>
+
+<p align="center">
+  <img alt="offline-first" src="https://img.shields.io/badge/offline-first-0f766e?style=for-the-badge" />
+  <img alt="python" src="https://img.shields.io/badge/python-3.9%2B-1d4ed8?style=for-the-badge" />
+  <img alt="stdlib only" src="https://img.shields.io/badge/deps-stdlib%20only-111827?style=for-the-badge" />
+  <img alt="cross platform" src="https://img.shields.io/badge/os-windows%20%7C%20macos%20%7C%20linux-334155?style=for-the-badge" />
+</p>
+
+<p align="center">
+  <a href="#quickstart">Quickstart</a> •
+  <a href="#worked-example-github-copilot-cli">Copilot Example</a> •
+  <a href="#privacy--security">Privacy</a> •
+  <a href="#providers-compatibility-matrix">Provider Matrix</a>
+</p>
+
+A production-minded, AI-agnostic orchestrator that drives coding-agent CLIs (Copilot, Claude, Codex, Kilo, and similar) through a task backlog with rate-limit-aware pacing and automatic provider/model fallback.
+
+## Live Demo
+
+<p align="center">
+  <img src="docs/assets/demo.svg" alt="Animated terminal demo" width="100%" />
+</p>
+
+## Why People Use It
+
+- Keeps moving when a provider hits 429/quota: auto-cooldown + rotate to next provider.
+- Protects quality with optional verification gates before marking tasks complete.
+- Runs unattended overnight, with resumable state and robust crash behavior.
+- Stays privacy-first: no telemetry, no phone-home, no hidden cloud dependency.
+- Works with tools you already use, instead of locking you into one AI vendor.
+
+## Quickstart
+
+```bash
+# install
+pip install task-orchestrator
+
+# initialize in your project
+task-orchestrator init
+
+# validate setup
+task-orchestrator validate
+
+# preview without execution
+task-orchestrator --dry-run
+
+# run one task
+task-orchestrator --once
+```
+
+## Providers Compatibility Matrix
+
+| Provider CLI | Command Template | Prompt Mode | Tested | Notes |
+|---|---|---|---|---|
+| GitHub Copilot CLI | `copilot --allow-all-tools --no-ask-user -s -p {{TASK}}` | Arg (`{{TASK}}`) | Yes | `copilot login` required first |
+| Claude Code | `claude --no-interactive --print` | stdin | Yes | Set `ANTHROPIC_API_KEY` |
+| Kilo Code | `kilo run --auto` | stdin | Yes | Use `--auto` for unattended runs |
+| Codex CLI | `codex --quiet` | stdin | Partial | May require additional no-interactive flags |
+| Ollama (local) | `ollama run codellama` | stdin | Partial | Good local fallback, no remote rate limits |
 
 ## Motivation
 
@@ -12,6 +77,18 @@ Two things were needed:
 2. A way to keep working even when a provider does get rate-limited, by switching to another available provider/model instead of sitting idle.
 
 Prompting the agent itself to "wait 60 seconds and then continue" doesn't work — an LLM has no real clock or way to pause execution mid-conversation, and each task is typically a separate CLI invocation anyway. The delay and the failover both have to live outside the model, in a controlling process.
+
+## Privacy & Security
+
+**Task Orchestrator runs 100% offline.** It never phones home, never sends telemetry, and never touches your API keys:
+
+- Zero network calls from the orchestrator itself — only your configured agent CLIs make outbound requests
+- API keys stay in your local environment variables; they're never logged, uploaded, or stored in plain text
+- Secrets in log output are automatically redacted
+- No analytics, no tracking, no cloud dependency
+- Fully auditable: single-file Python you can read end-to-end
+
+Your code, your keys, your machine. Nothing leaves without you explicitly configuring a provider CLI to do so.
 
 ## Requirements
 
@@ -170,19 +247,85 @@ By default this uses whatever models your logged-in Copilot account has access t
    ```
 4. Watch `logs/orchestrator.log` (or the terminal) for progress; if `require_manual_confirmation` is `true`, respond to the prompt after each attempt.
 
+### Copilot-First Run (Windows/PowerShell)
+
+This repo now includes a Copilot-only config and PowerShell helpers so you can run Todo tasks with GitHub Copilot CLI without editing the default config.
+
+Files:
+
+- `config.copilot.json` — Copilot-only provider, unattended mode, verification via `python -m unittest discover -s tests`
+- `run_copilot.ps1` — runs `orchestrator.py` with `--config config.copilot.json`
+- `run_forever.ps1` — PowerShell supervisor equivalent to `run_forever.sh`
+
+Examples:
+
+```powershell
+# Preview next task/provider (no execution)
+./run_copilot.ps1 --dry-run
+
+# Run one task and stop
+./run_copilot.ps1 --once
+
+# Run continuously with JSON logs
+./run_copilot.ps1 --json-logs
+
+# Crash-restart supervisor mode
+./run_forever.ps1 --config config.copilot.json
+```
+
+Prerequisites:
+
+- `copilot` CLI installed and authenticated (`copilot login`)
+- A Python interpreter on `PATH` as `python`, `python3`, or `py` (the `.ps1` scripts and `verify_commands` all auto-detect whichever is available)
+
 ### CLI flags
 
 - `--config <path>` — use a non-default config file
 - `--dry-run` — print the next task and provider without executing anything
+- `--dry-run-prompt` — print the exact prompt that would be sent for the next pending task, without executing anything
 - `--once` — run a single task and exit
 - `--json-logs` — append structured JSON log lines to `logs/orchestrator.jsonl` alongside normal logs
 - `--summary` — print a summary of today's run statistics (tasks completed, success rate, total run time, average time per task) and exit
+- `--list-tasks [N]` / `--peek [N]` — preview the next N pending tasks (default 10) with provider selection simulation, without executing anything
+- `--provider <name>` — force a specific provider by name for this run, ignoring the others entirely (its own cooldown still applies)
+- `--task "text"` — run a single ad-hoc task immediately without reading or modifying `Todo.md`
+- `--resume-from <text>` — skip pending tasks in `Todo.md` until reaching the first one containing this text, then proceed normally for the rest of this run (`Todo.md` itself is not modified)
+- `--skip-section <name>` — exclude tasks under a `Todo.md` section from being processed (repeatable)
+- `--concurrency <N>` — run up to N `[parallel]`-tagged tasks concurrently
+
+### Subcommands
+
+- `task-orchestrator init` — scaffold a new project's `config.json`, `Todo.md`, `prompts/task_prompt.txt`, and `.gitignore` in the current directory (never overwrites existing files)
+- `task-orchestrator validate` — check config structure, provider executable reachability, git working tree, and `Todo.md` presence, without running anything
 
 ## Known Limitations / Follow-ups
 
 - Rate-limit detection is text-pattern matching against CLI output, not a structured API response — patterns need to be tuned per tool/provider and may need updates if a CLI changes its error wording.
 - Providers are tried round-robin by default, but you can set a `priority` field to prefer specific providers (higher = preferred).
 - "Did the agent actually do anything?" (used to catch false-success completions and to confirm a rate-limit pattern match wasn't a false positive on real work) is decided via `git status --porcelain` in `working_directory`. That means any file your own tooling leaves untracked in that directory looks like "the agent changed something" — make sure `state.json`, `orchestrator.pid`, and `logs/` (all auto-created) are in `.gitignore`, or every task will look suspicious-free/rate-limit-free even when it isn't.
+
+## Security / Threat Model
+
+**Trusted-input assumption**: Task text from `Todo.md` flows into subprocess arguments (via `shlex.split` and `{{TASK}}` substitution). The orchestrator assumes Todo.md is authored by a trusted user — it does NOT sanitize task text for shell injection because:
+
+1. Provider commands are launched with `shell=False` (never `shell=True`), so shell metacharacters in task text have no special meaning.
+2. The `{{TASK}}` substitution inserts the prompt as a single argv element, not interpreted by a shell.
+3. `shlex.split()` is used only on the provider `command` string from config (also trusted), never on task text.
+
+**What this means for you**: Don't point the orchestrator at an untrusted Todo.md (e.g. one that could be modified by an attacker). In a CI context, ensure the Todo.md source is protected by the same access controls as your code.
+
+**Secret handling**: Provider `env` values that look like API keys are redacted from log output. Use `$VAR_NAME` interpolation in config to avoid storing secrets on disk at all.
+
+## Providers Compatibility Matrix
+
+| Provider CLI | Command Template | Stdin/Arg | Tested | Notes |
+|---|---|---|---|---|
+| GitHub Copilot CLI | `copilot --allow-all-tools --no-ask-user -s -p {{TASK}}` | Arg | ✅ | Requires `copilot login` first |
+| Claude Code | `claude --no-interactive --print` | Stdin | ✅ | Set `ANTHROPIC_API_KEY` in env |
+| Kilo Code | `kilo run --auto` | Stdin | ✅ | Interactive by default; `--auto` required |
+| Codex CLI | `codex --quiet` | Stdin | Untested | May need `--no-interactive` |
+| Aider | `aider --yes --message {{TASK}}` | Arg | Untested | Auto-confirms with `--yes` |
+| Ollama (local) | `ollama run codellama` | Stdin | Untested | No rate limits (local) |
 
 ## Dashboard
 
@@ -200,12 +343,33 @@ Set `dashboard_port` in `config.json` to the port you want the dashboard to list
 
 When `dashboard_port` is `null` (the default), the dashboard is disabled.
 
+Optional dashboard config:
+
+- `dashboard_retry_on_port_in_use` (default `true`) — if the configured port is busy, retry on the next ports
+- `open_dashboard_in_browser` (default `false`) — open dashboard URL in your default browser at startup
+
 ### Endpoints
 
 | Path | Content-Type | Description |
 |---|---|---|
 | `/` | `text/html` | Human-readable dashboard with auto-refresh (5s) |
 | `/api/state` | `application/json` | Machine-readable current run state |
+
+## Interactive Commands (Optional)
+
+Set `interactive_commands: true` in `config.json` to enable non-blocking keyboard commands during runs in an interactive terminal:
+
+- `p` then Enter — pause after current task
+- `r` then Enter — resume from pause
+- `s` then Enter — skip current task once (task stays unchecked; no reorder in `Todo.md`)
+- `q` then Enter — graceful quit
+
+Optional visual/audio flags (all default `false`):
+
+- `flair_mode`
+- `ascii_progress`
+- `provider_glyphs`
+- `audio_notifications`
 
 ### JSON response shape (`/api/state`)
 

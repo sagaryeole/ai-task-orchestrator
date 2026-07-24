@@ -1,0 +1,42 @@
+site_name: Task Orchestrator
+site_description: AI-agnostic task orchestrator with multi-provider rotation, rate-limit handling, and unattended execution.
+site_url: https://sagaryeole.github.io/ai-task-orchestrator/
+repo_url: https://github.com/sagaryeole/ai-task-orchestrator
+repo_name: ai-task-orchestrator
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.sections
+    - content.code.copy
+    - search.suggest
+
+nav:
+  - Home: index.md
+  - Quickstart: quickstart.md
+  - Configuration Reference: configuration.md
+  - Provider Guide: providers.md
+  - FAQ: faq.md
+  - Troubleshooting: troubleshooting.md
+  - Changelog: changelog.md
+
+markdown_extensions:
+  - admonition
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - toc:
+      permalink: true

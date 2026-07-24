@@ -8,3 +8,4 @@ __pycache__/
 .DS_Store
 .claude/settings.local.json
 config.json.bak
+*.lock

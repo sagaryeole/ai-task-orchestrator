@@ -42,9 +42,21 @@ from orchestrator import (
     _build_html,
     _write_pid_file,
     _remove_pid_file,
+    _resolve_executable,
+    _resolve_shell_python,
     html_escape,
     DashboardHandler,
     DashboardServer,
+    _compute_success_streak,
+    cmd_init,
+    cmd_validate,
+    _interpolate_env_vars,
+    _deep_merge,
+    _register_secrets,
+    _mask_secrets,
+    _secret_values,
+    _sigterm_handler,
+    GLOBAL_CONFIG_PATH,
 )
 
 
@@ -309,9 +321,10 @@ class TestDryRun(unittest.TestCase):
             todo = Path(tmpdir) / "Todo.md"
             todo.write_text("- [ ] Task one\n- [x] Task two\n")
             cfg_path = Path(tmpdir) / "config.json"
+            dry_cmd = "python -c \"print('hello')\""
             cfg_path.write_text(json.dumps({
                 "todo_file": str(todo),
-                "providers": [{"name": "dryrun-p", "command": "echo hello", "env": {}, "rate_limit_patterns": []}],
+                "providers": [{"name": "dryrun-p", "command": dry_cmd, "env": {}, "rate_limit_patterns": []}],
             }))
             state_path = Path(tmpdir) / "state.json"
             state_path.write_text(json.dumps({"provider_cooldowns": {}}))
@@ -330,9 +343,17 @@ class TestDryRun(unittest.TestCase):
 
 class TestGitCommitGuard(unittest.TestCase):
     def test_git_commit_no_changes(self):
-        cfg = {"auto_commit": True, "working_directory": "/tmp"}
-        result = git_commit(cfg, "dummy")
-        self.assertIsNone(result)
+        import subprocess as sp
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sp.run(["git", "init", "-q"], cwd=tmpdir)
+            sp.run(["git", "config", "user.email", "tests@example.com"], cwd=tmpdir)
+            sp.run(["git", "config", "user.name", "Tests"], cwd=tmpdir)
+            (Path(tmpdir) / "a.txt").write_text("ok\n")
+            sp.run(["git", "add", "-A"], cwd=tmpdir)
+            sp.run(["git", "commit", "-q", "-m", "baseline"], cwd=tmpdir)
+            cfg = {"auto_commit": True, "working_directory": tmpdir}
+            result = git_commit(cfg, "dummy")
+            self.assertIsNone(result)
 
 
 class TestSuspiciousCompletion(unittest.TestCase):
@@ -357,12 +378,13 @@ class TestSuspiciousCompletion(unittest.TestCase):
             todo = Path(tmpdir) / "Todo.md"
             todo.write_text("- [ ] Task one\n")
             cfg_path = Path(tmpdir) / "config.json"
+            no_change_cmd = "python -c \"print('hello')\""
             cfg_path.write_text(json.dumps({
                 "todo_file": str(todo),
                 "working_directory": tmpdir,
                 "require_manual_confirmation": False,
                 "continue_on_failure": True,
-                "providers": [{"name": "p", "command": "echo hello", "env": {}, "rate_limit_patterns": []}],
+                "providers": [{"name": "p", "command": no_change_cmd, "env": {}, "rate_limit_patterns": []}],
             }))
             state_path = Path(tmpdir) / "state.json"
             state_path.write_text(json.dumps({"provider_cooldowns": {}}))
@@ -398,7 +420,8 @@ class TestSuspiciousCompletion(unittest.TestCase):
             todo.write_text("- [ ] Task one\n")
             cfg_path = Path(tmpdir) / "config.json"
             # Command actually modifies a tracked file, so git diff --stat is non-empty.
-            write_cmd = f"python3 -c \"open('{tmpdir}/existing.txt', 'w').write('changed')\""
+            target = (Path(tmpdir) / "existing.txt").as_posix()
+            write_cmd = f"python -c \"open(r'{target}', 'w').write('changed')\""
             cfg_path.write_text(json.dumps({
                 "todo_file": str(todo),
                 "working_directory": tmpdir,
@@ -446,8 +469,9 @@ class TestRateLimitFalsePositive(unittest.TestCase):
             todo = Path(tmpdir) / "Todo.md"
             todo.write_text("- [ ] Task one\n")
             cfg_path = Path(tmpdir) / "config.json"
+            target = (Path(tmpdir) / "existing.txt").as_posix()
             write_cmd = (
-                f"python3 -c \"import os; open('{tmpdir}/existing.txt', 'w').write('changed'); "
+                f"python -c \"import os; open(r'{target}', 'w').write('changed'); "
                 "print('rate limit from model')\""
             )
             cfg_path.write_text(json.dumps({
@@ -497,7 +521,7 @@ class TestRateLimitFalsePositive(unittest.TestCase):
             todo.write_text("- [ ] Task one\n")
             cfg_path = Path(tmpdir) / "config.json"
             # Output contains "rate limit" but makes NO file changes.
-            cmd = "python3 -c \"print('rate limit exceeded')\""
+            cmd = "python -c \"print('rate limit exceeded')\""
             cfg_path.write_text(json.dumps({
                 "todo_file": str(todo),
                 "working_directory": tmpdir,
@@ -512,7 +536,7 @@ class TestRateLimitFalsePositive(unittest.TestCase):
                     },
                     {
                         "name": "fail-p",
-                        "command": "false",
+                        "command": "python -c \"import sys; sys.exit(1)\"",
                         "env": {},
                         "rate_limit_patterns": []
                     },
@@ -544,12 +568,14 @@ class TestVerifyLiveOutput(unittest.TestCase):
     def test_verify_prints_to_stderr(self):
         import io
         from unittest.mock import patch
-        with patch('sys.stderr', new=io.StringIO()) as fake_err:
-            with patch('orchestrator.log') as mock_log:
-                run_verification({"verify_commands": ["false"], "working_directory": "/tmp"})
-            stderr_output = fake_err.getvalue()
-            self.assertIn("Verification FAILED", stderr_output)
-            self.assertIn("false", stderr_output)
+        fail_cmd = "python -c \"import sys; sys.exit(1)\""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch('sys.stderr', new=io.StringIO()) as fake_err:
+                with patch('orchestrator.log') as mock_log:
+                    run_verification({"verify_commands": [fail_cmd], "working_directory": tmpdir})
+                stderr_output = fake_err.getvalue()
+                self.assertIn("Verification FAILED", stderr_output)
+                self.assertIn("sys.exit(1)", stderr_output)
 
 
 class TestSkipTask(unittest.TestCase):
@@ -561,9 +587,10 @@ class TestSkipTask(unittest.TestCase):
             todo = Path(tmpdir) / "Todo.md"
             todo.write_text("- [ ] Task one\n- [ ] Task two\n")
             cfg_path = Path(tmpdir) / "config.json"
+            ok_cmd = "python -c \"print('ok')\""
             cfg_path.write_text(json.dumps({
                 "todo_file": str(todo),
-                "providers": [{"name": "p", "command": "echo hello", "env": {}, "rate_limit_patterns": []}],
+                "providers": [{"name": "p", "command": ok_cmd, "env": {}, "rate_limit_patterns": []}],
                 "require_manual_confirmation": True,
             }))
             state_path = Path(tmpdir) / "state.json"
@@ -579,7 +606,7 @@ class TestSkipTask(unittest.TestCase):
                                 with patch('orchestrator.PID_PATH', pid_path):
                                     main()
             log_output = ' '.join(str(call.args[0]) for call in mock_log.call_args_list)
-            self.assertIn("deferred", log_output)
+            self.assertIn("skipped for this cycle", log_output)
             final_text = todo.read_text()
             self.assertIn("- [x] Task one", final_text)
             self.assertIn("- [x] Task two", final_text)
@@ -855,6 +882,100 @@ class TestSummaryFlag(unittest.TestCase):
             self.assertIn("Tasks completed today: 1", output)
 
 
+class TestSummaryEnhancements(unittest.TestCase):
+    def test_summary_includes_streak_and_verdict(self):
+        from unittest.mock import patch
+        today = datetime.date.today().isoformat()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_dir = Path(tmpdir) / "logs"
+            log_dir.mkdir()
+            log_file = log_dir / "orchestrator.log"
+            log_file.write_text(
+                f"[{today} 10:00:00] Task marked complete: A (provider: p)\n"
+                f"[{today} 10:01:00] Task marked complete: B (provider: p)\n"
+            )
+            todo = Path(tmpdir) / "Todo.md"
+            todo.write_text("- [x] A\n")
+            state = {"completed_task_durations": [10.0, 20.0]}
+            fake_stdout = io.StringIO()
+            with patch('sys.stdout', fake_stdout):
+                with patch('orchestrator.LOG_DIR', log_dir):
+                    print_summary(state, todo, log_path=log_file)
+            output = fake_stdout.getvalue()
+            self.assertIn("Current success streak:", output)
+            self.assertIn("Verdict:", output)
+
+    def test_compute_success_streak(self):
+        today = datetime.date.today().isoformat()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_file = Path(tmpdir) / "orchestrator.log"
+            log_file.write_text(
+                f"[{today} 09:00:00] Task NOT completed: A\n"
+                f"[{today} 09:05:00] Task marked complete: B\n"
+                f"[{today} 09:10:00] Task marked complete: C\n"
+            )
+            streak = _compute_success_streak(log_file, today)
+            self.assertEqual(streak, 2)
+
+
+class TestListTasksFlag(unittest.TestCase):
+    def test_list_tasks_prints_preview(self):
+        from unittest.mock import patch
+        from orchestrator import main
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            import subprocess as sp
+            sp.run(["git", "init", "-q"], cwd=tmpdir)
+            sp.run(["git", "config", "user.email", "tests@example.com"], cwd=tmpdir)
+            sp.run(["git", "config", "user.name", "Tests"], cwd=tmpdir)
+
+            todo = Path(tmpdir) / "Todo.md"
+            todo.write_text("- [ ] Task one\n- [ ] Task two\n")
+            cfg_path = Path(tmpdir) / "config.json"
+            cfg_path.write_text(json.dumps({
+                "todo_file": str(todo),
+                "working_directory": tmpdir,
+                "providers": [{"name": "p", "command": "python -c \"print('ok')\"", "env": {}, "rate_limit_patterns": []}],
+            }))
+            state_path = Path(tmpdir) / "state.json"
+            state_path.write_text(json.dumps({"provider_cooldowns": {}}))
+            pid_path = Path(tmpdir) / "orchestrator.pid"
+
+            with patch.object(sys, 'argv', ['orchestrator.py', '--config', str(cfg_path), '--list-tasks', '2']):
+                with patch('orchestrator.STATE_PATH', state_path):
+                    with patch('orchestrator.PID_PATH', pid_path):
+                        with patch('orchestrator.log') as mock_log:
+                            main()
+            joined = " ".join(str(c.args[0]) for c in mock_log.call_args_list)
+            self.assertIn("Next 2 pending tasks", joined)
+            self.assertIn("Task one", joined)
+            self.assertIn("Task two", joined)
+
+
+class TestDashboardPortFallback(unittest.TestCase):
+    def _find_free_port(self):
+        import socket
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("127.0.0.1", 0))
+            return s.getsockname()[1]
+
+    def test_dashboard_retries_to_next_port(self):
+        import socket
+        busy_port = self._find_free_port()
+        blocker = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        blocker.bind(("127.0.0.1", busy_port))
+        blocker.listen(1)
+        try:
+            server = start_dashboard(busy_port, retry_on_port_in_use=True, max_attempts=3)
+            self.assertIsNotNone(server)
+            self.assertNotEqual(server.server_port, busy_port)
+            server.shutdown()
+            server.server_close()
+        finally:
+            blocker.close()
+
+
+
 class TestProviderStats(unittest.TestCase):
     def test_stats_logs_output(self):
         from unittest.mock import patch
@@ -867,7 +988,7 @@ class TestProviderStats(unittest.TestCase):
         }
         with patch('orchestrator.log_json') as mock_json:
             p = Provider(cfg)
-            run_provider_stats(p, "/tmp", "Test task")
+            run_provider_stats(p, ".", "Test task")
         logged = [str(c.args[0]) for c in mock_json.call_args_list]
         self.assertTrue(any("provider_stats" in c for c in logged))
 
@@ -881,7 +1002,7 @@ class TestProviderStats(unittest.TestCase):
         }
         with patch('orchestrator.log') as mock_log:
             p = Provider(cfg)
-            run_provider_stats(p, "/tmp", "Test task")
+            run_provider_stats(p, ".", "Test task")
         self.assertEqual(mock_log.call_count, 0)
 
     def test_stats_command_not_found(self):
@@ -896,7 +1017,7 @@ class TestProviderStats(unittest.TestCase):
         with patch('orchestrator.log') as mock_log:
             with patch('orchestrator.log_json') as mock_json:
                 p = Provider(cfg)
-                run_provider_stats(p, "/tmp", "Test task")
+                run_provider_stats(p, ".", "Test task")
         log_msgs = [str(c.args[0]) for c in mock_log.call_args_list]
         self.assertTrue(any("not found" in m for m in log_msgs))
 
@@ -920,7 +1041,7 @@ class TestProviderStats(unittest.TestCase):
             with patch('orchestrator.log_json') as mock_json:
                 with patch('orchestrator.subprocess.run', side_effect=subprocess.TimeoutExpired(cmd="stats-binary", timeout=30)):
                     p = Provider(cfg)
-                    run_provider_stats(p, "/tmp", "Test task")
+                    run_provider_stats(p, ".", "Test task")
         log_msgs = [str(c.args[0]) for c in mock_log.call_args_list]
         self.assertTrue(any("timed out" in m for m in log_msgs))
 
@@ -931,11 +1052,11 @@ class TestProviderStats(unittest.TestCase):
             "command": "echo hello",
             "env": {},
             "rate_limit_patterns": [],
-            "stats_command": "printf '{\"tokens\": 50, \"cost\": 0.01}'",
+            "stats_command": "python -c \"import json; print(json.dumps({'tokens': 50, 'cost': 0.01}))\"",
         }
         with patch('orchestrator.log_json') as mock_json:
             p = Provider(cfg)
-            run_provider_stats(p, "/tmp", "Test task")
+            run_provider_stats(p, ".", "Test task")
         args_list = [c.args for c in mock_json.call_args_list]
         event_names = [a[0] for a in args_list if a]
         self.assertIn("provider_stats", event_names)
@@ -1090,6 +1211,7 @@ class TestDashboardServer(unittest.TestCase):
         port = self._find_free_port()
         server = start_dashboard(port)
         self.assertIsNotNone(server)
+        server.shutdown()
         server.server_close()
 
     def test_json_endpoint_returns_valid_json(self):
@@ -1107,6 +1229,7 @@ class TestDashboardServer(unittest.TestCase):
             self.assertIn("uptime_seconds", data)
         finally:
             server.shutdown()
+            server.server_close()
 
     def test_html_endpoint_returns_html(self):
         import urllib.request
@@ -1121,6 +1244,7 @@ class TestDashboardServer(unittest.TestCase):
             self.assertIn("Orchestrator Dashboard", content)
         finally:
             server.shutdown()
+            server.server_close()
 
     def test_json_endpoint_with_state(self):
         import urllib.request
@@ -1136,6 +1260,7 @@ class TestDashboardServer(unittest.TestCase):
             self.assertEqual(data["current_provider"], "kilo")
         finally:
             server.shutdown()
+            server.server_close()
 
 
 class TestNonUTF8Output(unittest.TestCase):
@@ -1150,7 +1275,7 @@ class TestNonUTF8Output(unittest.TestCase):
         from orchestrator import Provider
 
         # A command that writes raw non-UTF-8 bytes to stdout
-        cmd = "python3 -c \"import sys; sys.stdout.buffer.write(b'\\xff\\xfe hello')\""
+        cmd = "python -c \"import sys; sys.stdout.buffer.write(b'\\xff\\xfe hello')\""
         cfg = {
             "name": "nonutf8-p",
             "command": cmd,
@@ -1158,7 +1283,8 @@ class TestNonUTF8Output(unittest.TestCase):
             "rate_limit_patterns": [],
         }
         p = Provider(cfg)
-        exit_code, output, rate_limited = p.run("test prompt", "/tmp")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            exit_code, output, rate_limited = p.run("test prompt", tmpdir)
         # Should not crash — the bad bytes are replaced, not raised
         self.assertIsInstance(output, str)
         self.assertIn("hello", output)
@@ -1168,7 +1294,7 @@ class TestNonUTF8Output(unittest.TestCase):
         from unittest.mock import patch
         from orchestrator import Provider
 
-        cmd = "python3 -c \"import sys; sys.stderr.buffer.write(b'\\xff malformed')\""
+        cmd = "python -c \"import sys; sys.stderr.buffer.write(b'\\xff malformed')\""
         cfg = {
             "name": "nonutf8-stderr",
             "command": cmd,
@@ -1176,7 +1302,8 @@ class TestNonUTF8Output(unittest.TestCase):
             "rate_limit_patterns": [],
         }
         p = Provider(cfg)
-        exit_code, output, rate_limited = p.run("test prompt", "/tmp")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            exit_code, output, rate_limited = p.run("test prompt", tmpdir)
         self.assertIsInstance(output, str)
         self.assertIn("malformed", output)
 
@@ -1283,6 +1410,509 @@ class TestValidateGitWorkingTree(unittest.TestCase):
             with self.assertRaises(SystemExit) as cm:
                 validate_git_working_tree(tmpdir)
             self.assertIn("not inside a git working tree", str(cm.exception))
+
+
+class TestResolveExecutable(unittest.TestCase):
+    def test_returns_direct_which_match(self):
+        from unittest.mock import patch
+        with patch("orchestrator.shutil.which", return_value="/usr/bin/copilot"):
+            resolved = _resolve_executable("copilot")
+        self.assertEqual(resolved, "/usr/bin/copilot")
+
+    def test_windows_falls_back_to_cmd_suffix(self):
+        from unittest.mock import patch
+
+        def fake_which(name, path=None):
+            if name == "copilot":
+                return None
+            if name == "copilot.cmd":
+                return r"C:\tools\copilot.cmd"
+            return None
+
+        with patch("orchestrator.shutil.which", side_effect=fake_which):
+            with patch("orchestrator.os.name", "nt"):
+                resolved = _resolve_executable("copilot")
+        self.assertEqual(resolved, r"C:\tools\copilot.cmd")
+
+    def test_returns_original_when_unresolved(self):
+        from unittest.mock import patch
+        with patch("orchestrator.shutil.which", return_value=None):
+            resolved = _resolve_executable("missing-cli")
+        self.assertEqual(resolved, "missing-cli")
+
+
+class TestWindowsPs1ProviderLaunch(unittest.TestCase):
+    def test_provider_wraps_ps1_with_pwsh(self):
+        from unittest.mock import patch, Mock
+
+        cfg = {
+            "name": "copilot",
+            "command": "copilot --allow-all-tools -p {{TASK}}",
+            "env": {},
+            "rate_limit_patterns": [],
+        }
+        provider = Provider(cfg)
+
+        fake_process = Mock()
+        fake_process.pid = 12345
+
+        def fake_which(name, path=None):
+            if name == "copilot":
+                return r"C:\tools\copilot.ps1"
+            if name == "pwsh":
+                return r"C:\Program Files\PowerShell\7\pwsh.exe"
+            return None
+
+        with patch("orchestrator.os.name", "nt"):
+            with patch("orchestrator.shutil.which", side_effect=fake_which):
+                with patch("orchestrator.subprocess.Popen", return_value=fake_process) as mock_popen:
+                    with patch.object(Provider, "_wait_for_result", return_value=(0, "", False)):
+                        provider.run("task prompt", ".")
+
+        launch_cmd = mock_popen.call_args.args[0]
+        self.assertEqual(launch_cmd[0], r"C:\Program Files\PowerShell\7\pwsh.exe")
+        self.assertEqual(launch_cmd[1:5], ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
+        self.assertEqual(launch_cmd[5], r"C:\tools\copilot.ps1")
+
+
+class TestPythonAliasResolution(unittest.TestCase):
+    """_resolve_executable should fall back between 'python'/'python3' (and
+    finally to sys.executable) since only one name is guaranteed to exist
+    on any given OS."""
+
+    def test_python_falls_back_to_python3(self):
+        from unittest.mock import patch
+
+        def fake_which(name, path=None):
+            return "/usr/bin/python3" if name == "python3" else None
+
+        with patch("orchestrator.shutil.which", side_effect=fake_which):
+            resolved = _resolve_executable("python")
+        self.assertEqual(resolved, "/usr/bin/python3")
+
+    def test_python3_falls_back_to_python(self):
+        from unittest.mock import patch
+
+        def fake_which(name, path=None):
+            return "/usr/bin/python" if name == "python" else None
+
+        with patch("orchestrator.shutil.which", side_effect=fake_which):
+            resolved = _resolve_executable("python3")
+        self.assertEqual(resolved, "/usr/bin/python")
+
+    def test_falls_back_to_sys_executable_when_neither_on_path(self):
+        from unittest.mock import patch
+
+        with patch("orchestrator.shutil.which", return_value=None):
+            resolved = _resolve_executable("python")
+        self.assertEqual(resolved, sys.executable)
+
+    def test_non_python_executable_unaffected(self):
+        from unittest.mock import patch
+        with patch("orchestrator.shutil.which", return_value=None):
+            resolved = _resolve_executable("kilo")
+        self.assertEqual(resolved, "kilo")
+
+    def test_resolve_shell_python_rewrites_leading_token(self):
+        from unittest.mock import patch
+
+        def fake_which(name, path=None):
+            return "/usr/bin/python3" if name == "python3" else None
+
+        with patch("orchestrator.shutil.which", side_effect=fake_which):
+            rewritten = _resolve_shell_python("python -m unittest discover -s tests")
+        self.assertEqual(rewritten, "/usr/bin/python3 -m unittest discover -s tests")
+
+    def test_resolve_shell_python_leaves_non_python_commands_alone(self):
+        rewritten = _resolve_shell_python("make test")
+        self.assertEqual(rewritten, "make test")
+
+
+class TestInitCommand(unittest.TestCase):
+    def test_init_creates_expected_files(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = cmd_init(tmpdir)
+            self.assertEqual(result, 0)
+            self.assertTrue((Path(tmpdir) / "config.json").exists())
+            self.assertTrue((Path(tmpdir) / "Todo.md").exists())
+            self.assertTrue((Path(tmpdir) / "prompts" / "task_prompt.txt").exists())
+            self.assertTrue((Path(tmpdir) / ".gitignore").exists())
+
+            config = json.loads((Path(tmpdir) / "config.json").read_text())
+            self.assertIn("providers", config)
+            self.assertIn("verify_commands", config)
+
+    def test_init_does_not_overwrite_existing_files(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            todo_path = Path(tmpdir) / "Todo.md"
+            todo_path.write_text("- [ ] My existing task\n")
+
+            cmd_init(tmpdir)
+
+            self.assertEqual(todo_path.read_text(), "- [ ] My existing task\n")
+
+    def test_init_appends_missing_gitignore_entries_without_duplicating(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            gitignore_path = Path(tmpdir) / ".gitignore"
+            gitignore_path.write_text("state.json\n")
+
+            cmd_init(tmpdir)
+
+            content = gitignore_path.read_text()
+            self.assertEqual(content.count("state.json"), 1)
+            self.assertIn("*.lock", content)
+
+
+class TestValidateCommand(unittest.TestCase):
+    def test_validate_missing_config_fails(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = cmd_validate(Path(tmpdir) / "config.json")
+        self.assertEqual(result, 1)
+
+    def test_validate_passes_for_well_formed_config(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            import subprocess as sp
+            sp.run(["git", "init", "-q"], cwd=tmpdir)
+            sp.run(["git", "config", "user.email", "tests@example.com"], cwd=tmpdir)
+            sp.run(["git", "config", "user.name", "Tests"], cwd=tmpdir)
+
+            todo_path = Path(tmpdir) / "Todo.md"
+            todo_path.write_text("- [ ] A task\n")
+            cfg_path = Path(tmpdir) / "config.json"
+            cfg_path.write_text(json.dumps({
+                "todo_file": str(todo_path),
+                "working_directory": tmpdir,
+                "providers": [{"name": "p", "command": "python3 -c \"print(1)\"", "env": {}, "rate_limit_patterns": []}],
+            }))
+
+            result = cmd_validate(cfg_path)
+        self.assertEqual(result, 0)
+
+    def test_validate_flags_unresolvable_provider_command(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            import subprocess as sp
+            sp.run(["git", "init", "-q"], cwd=tmpdir)
+
+            todo_path = Path(tmpdir) / "Todo.md"
+            todo_path.write_text("- [ ] A task\n")
+            cfg_path = Path(tmpdir) / "config.json"
+            cfg_path.write_text(json.dumps({
+                "todo_file": str(todo_path),
+                "working_directory": tmpdir,
+                "providers": [{"name": "p", "command": "definitely-not-a-real-binary-xyz", "env": {}, "rate_limit_patterns": []}],
+            }))
+
+            result = cmd_validate(cfg_path)
+        self.assertEqual(result, 1)
+
+
+class TestEnvVarInterpolation(unittest.TestCase):
+    def test_dollar_brace_form_substituted(self):
+        os.environ["ORCH_TEST_VAR_A"] = "hello"
+        try:
+            self.assertEqual(_interpolate_env_vars("value: ${ORCH_TEST_VAR_A}"), "value: hello")
+        finally:
+            del os.environ["ORCH_TEST_VAR_A"]
+
+    def test_bare_dollar_form_substituted(self):
+        os.environ["ORCH_TEST_VAR_B"] = "world"
+        try:
+            self.assertEqual(_interpolate_env_vars("value: $ORCH_TEST_VAR_B"), "value: world")
+        finally:
+            del os.environ["ORCH_TEST_VAR_B"]
+
+    def test_unresolved_var_left_literal(self):
+        self.assertNotIn("ORCH_TEST_VAR_UNSET_XYZ", os.environ)
+        result = _interpolate_env_vars("value: ${ORCH_TEST_VAR_UNSET_XYZ}")
+        self.assertEqual(result, "value: ${ORCH_TEST_VAR_UNSET_XYZ}")
+
+    def test_recurses_into_nested_dicts_and_lists(self):
+        os.environ["ORCH_TEST_VAR_C"] = "secretvalue"
+        try:
+            config = {"providers": [{"env": {"KEY": "$ORCH_TEST_VAR_C"}}]}
+            result = _interpolate_env_vars(config)
+            self.assertEqual(result["providers"][0]["env"]["KEY"], "secretvalue")
+        finally:
+            del os.environ["ORCH_TEST_VAR_C"]
+
+
+class TestDeepMerge(unittest.TestCase):
+    def test_override_wins_on_scalar_conflict(self):
+        self.assertEqual(_deep_merge({"a": 1}, {"a": 2}), {"a": 2})
+
+    def test_nested_dicts_merge_recursively(self):
+        base = {"nested": {"x": 1, "y": 2}}
+        override = {"nested": {"y": 99}}
+        self.assertEqual(_deep_merge(base, override), {"nested": {"x": 1, "y": 99}})
+
+    def test_lists_are_replaced_not_merged(self):
+        base = {"providers": ["global-provider"]}
+        override = {"providers": ["project-provider"]}
+        self.assertEqual(_deep_merge(base, override), {"providers": ["project-provider"]})
+
+    def test_keys_only_in_base_are_kept(self):
+        self.assertEqual(_deep_merge({"a": 1}, {}), {"a": 1})
+
+
+class TestGlobalConfigMerge(unittest.TestCase):
+    def test_load_config_merges_global_config_under_project_config(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmpdir:
+            global_cfg_path = Path(tmpdir) / "global-config.json"
+            global_cfg_path.write_text(json.dumps({
+                "delay_seconds": 999,
+                "providers": [{"name": "global-p", "command": "echo hi", "env": {}, "rate_limit_patterns": []}],
+            }))
+            project_cfg_path = Path(tmpdir) / "config.json"
+            project_cfg_path.write_text(json.dumps({
+                "todo_file": "Todo.md",
+                "providers": [{"name": "project-p", "command": "echo hi", "env": {}, "rate_limit_patterns": []}],
+            }))
+
+            with patch("orchestrator.GLOBAL_CONFIG_PATH", global_cfg_path):
+                config = load_config(project_cfg_path)
+
+        self.assertEqual(config["delay_seconds"], 999)  # only in global -> inherited
+        self.assertEqual(config["providers"][0]["name"], "project-p")  # project replaces list wholesale
+
+    def test_load_config_without_global_config_present(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmpdir:
+            missing_global = Path(tmpdir) / "does-not-exist.json"
+            project_cfg_path = Path(tmpdir) / "config.json"
+            project_cfg_path.write_text(json.dumps({
+                "todo_file": "Todo.md",
+                "providers": [{"name": "p", "command": "echo hi", "env": {}, "rate_limit_patterns": []}],
+            }))
+            with patch("orchestrator.GLOBAL_CONFIG_PATH", missing_global):
+                config = load_config(project_cfg_path)
+        self.assertEqual(config["providers"][0]["name"], "p")
+
+
+class TestSecretMasking(unittest.TestCase):
+    def setUp(self):
+        _secret_values.clear()
+
+    def tearDown(self):
+        _secret_values.clear()
+
+    def test_register_secrets_picks_up_key_like_env_vars(self):
+        provider = Provider({
+            "name": "p", "command": "echo hi",
+            "env": {"MY_API_KEY": "topsecret123", "HARMLESS_FLAG": "true"},
+            "rate_limit_patterns": [],
+        })
+        _register_secrets([provider])
+        self.assertIn("topsecret123", _secret_values)
+        self.assertNotIn("true", _secret_values)
+
+    def test_mask_secrets_redacts_registered_values(self):
+        _secret_values.add("topsecret123")
+        masked = _mask_secrets("the response included topsecret123 in plain text")
+        self.assertNotIn("topsecret123", masked)
+        self.assertIn("REDACTED", masked)
+
+    def test_mask_secrets_noop_when_nothing_registered(self):
+        self.assertEqual(_mask_secrets("nothing sensitive here"), "nothing sensitive here")
+
+    def test_log_redacts_secret_in_message(self):
+        from unittest.mock import patch
+        provider = Provider({
+            "name": "p", "command": "echo hi",
+            "env": {"SOME_TOKEN": "shh-dont-tell"},
+            "rate_limit_patterns": [],
+        })
+        _register_secrets([provider])
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch("orchestrator.LOG_DIR", Path(tmpdir)):
+                from orchestrator import log
+                log("leaked value: shh-dont-tell")
+                logged = (Path(tmpdir) / "orchestrator.log").read_text()
+        self.assertNotIn("shh-dont-tell", logged)
+        self.assertIn("REDACTED", logged)
+
+
+class TestAtomicStateWrite(unittest.TestCase):
+    def test_save_state_writes_via_temp_file_and_replace(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_path = Path(tmpdir) / "state.json"
+            with patch("orchestrator.STATE_PATH", state_path):
+                save_state({"provider_cooldowns": {"p": 123}})
+            self.assertTrue(state_path.exists())
+            self.assertEqual(json.loads(state_path.read_text())["provider_cooldowns"]["p"], 123)
+            # no leftover temp file
+            self.assertFalse((Path(tmpdir) / "state.json.tmp").exists())
+
+    def test_save_state_overwrites_existing_file_atomically(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_path = Path(tmpdir) / "state.json"
+            state_path.write_text(json.dumps({"provider_cooldowns": {"old": 1}}))
+            with patch("orchestrator.STATE_PATH", state_path):
+                save_state({"provider_cooldowns": {"new": 2}})
+            data = json.loads(state_path.read_text())
+        self.assertEqual(data["provider_cooldowns"], {"new": 2})
+
+
+class TestNewCliFlags(unittest.TestCase):
+    def test_provider_flag_restricts_to_named_provider(self):
+        from unittest.mock import patch
+        from orchestrator import main
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            todo = Path(tmpdir) / "Todo.md"
+            todo.write_text("- [ ] Task one\n")
+            cfg_path = Path(tmpdir) / "config.json"
+            cfg_path.write_text(json.dumps({
+                "todo_file": str(todo),
+                "providers": [
+                    {"name": "p1", "command": "python3 -c \"print(1)\"", "env": {}, "rate_limit_patterns": []},
+                    {"name": "p2", "command": "python3 -c \"print(2)\"", "env": {}, "rate_limit_patterns": []},
+                ],
+            }))
+            state_path = Path(tmpdir) / "state.json"
+            state_path.write_text(json.dumps({"provider_cooldowns": {}}))
+            pid_path = Path(tmpdir) / "orchestrator.pid"
+
+            argv = ["orchestrator.py", "--config", str(cfg_path), "--dry-run", "--provider", "p2"]
+            with patch.object(sys, "argv", argv):
+                with patch("orchestrator.log") as mock_log:
+                    with patch("orchestrator.STATE_PATH", state_path):
+                        with patch("orchestrator.PID_PATH", pid_path):
+                            main()
+            log_output = " ".join(str(call.args[0]) for call in mock_log.call_args_list)
+            self.assertIn("Forcing provider: p2", log_output)
+            self.assertIn("p2", log_output)
+            self.assertNotIn("would run task via provider 'p1'", log_output)
+
+    def test_provider_flag_exits_when_name_not_found(self):
+        from unittest.mock import patch
+        from orchestrator import main
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            todo = Path(tmpdir) / "Todo.md"
+            todo.write_text("- [ ] Task one\n")
+            cfg_path = Path(tmpdir) / "config.json"
+            cfg_path.write_text(json.dumps({
+                "todo_file": str(todo),
+                "providers": [{"name": "p1", "command": "python3 -c \"print(1)\"", "env": {}, "rate_limit_patterns": []}],
+            }))
+            state_path = Path(tmpdir) / "state.json"
+            state_path.write_text(json.dumps({"provider_cooldowns": {}}))
+            pid_path = Path(tmpdir) / "orchestrator.pid"
+
+            argv = ["orchestrator.py", "--config", str(cfg_path), "--dry-run", "--provider", "does-not-exist"]
+            with patch.object(sys, "argv", argv):
+                with patch("orchestrator.STATE_PATH", state_path):
+                    with patch("orchestrator.PID_PATH", pid_path):
+                        with self.assertRaises(SystemExit):
+                            main()
+
+    def test_dry_run_prompt_prints_full_prompt_without_executing(self):
+        from unittest.mock import patch
+        from orchestrator import main
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            todo = Path(tmpdir) / "Todo.md"
+            todo.write_text("- [ ] Build the widget\n")
+            prompt_path = Path(tmpdir) / "task_prompt.txt"
+            prompt_path.write_text("Do this: {{TASK}}\n")
+            cfg_path = Path(tmpdir) / "config.json"
+            cfg_path.write_text(json.dumps({
+                "todo_file": str(todo),
+                "prompt_template": str(prompt_path),
+                "providers": [{"name": "p", "command": "python3 -c \"print(1)\"", "env": {}, "rate_limit_patterns": []}],
+            }))
+            state_path = Path(tmpdir) / "state.json"
+            state_path.write_text(json.dumps({"provider_cooldowns": {}}))
+            pid_path = Path(tmpdir) / "orchestrator.pid"
+
+            argv = ["orchestrator.py", "--config", str(cfg_path), "--dry-run-prompt"]
+            with patch.object(sys, "argv", argv):
+                with patch("orchestrator.STATE_PATH", state_path):
+                    with patch("orchestrator.PID_PATH", pid_path):
+                        with patch("sys.stdout", new_callable=io.StringIO) as fake_stdout:
+                            main()
+            self.assertIn("Do this: Build the widget", fake_stdout.getvalue())
+
+    def test_resume_from_skips_earlier_tasks_without_modifying_todo(self):
+        from unittest.mock import patch
+        from orchestrator import main
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            todo = Path(tmpdir) / "Todo.md"
+            todo.write_text("- [ ] First task\n- [ ] Second task\n- [ ] Third task\n")
+            cfg_path = Path(tmpdir) / "config.json"
+            cfg_path.write_text(json.dumps({
+                "todo_file": str(todo),
+                "providers": [{"name": "p", "command": "python3 -c \"import sys; sys.exit(1)\"", "env": {}, "rate_limit_patterns": []}],
+                "max_retries_per_provider": 1,
+                "require_manual_confirmation": False,
+                "continue_on_failure": True,
+                "delay_seconds": 0,
+            }))
+            state_path = Path(tmpdir) / "state.json"
+            state_path.write_text(json.dumps({"provider_cooldowns": {}}))
+            pid_path = Path(tmpdir) / "orchestrator.pid"
+
+            argv = ["orchestrator.py", "--config", str(cfg_path), "--once", "--resume-from", "Second"]
+            with patch.object(sys, "argv", argv):
+                with patch("orchestrator.log") as mock_log:
+                    with patch("orchestrator.STATE_PATH", state_path):
+                        with patch("orchestrator.PID_PATH", pid_path):
+                            main()
+
+            log_output = " ".join(str(call.args[0]) for call in mock_log.call_args_list)
+            self.assertIn("Resuming from task matching 'Second'", log_output)
+            self.assertIn("Starting task: Second task", log_output)
+            self.assertNotIn("Starting task: First task", log_output)
+            # Todo.md content itself must be untouched by --resume-from
+            self.assertEqual(todo.read_text(), "- [ ] First task\n- [ ] Second task\n- [ ] Third task\n")
+
+    def test_resume_from_exits_when_no_task_matches(self):
+        from unittest.mock import patch
+        from orchestrator import main
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            todo = Path(tmpdir) / "Todo.md"
+            todo.write_text("- [ ] First task\n")
+            cfg_path = Path(tmpdir) / "config.json"
+            cfg_path.write_text(json.dumps({
+                "todo_file": str(todo),
+                "providers": [{"name": "p", "command": "python3 -c \"print(1)\"", "env": {}, "rate_limit_patterns": []}],
+            }))
+            state_path = Path(tmpdir) / "state.json"
+            state_path.write_text(json.dumps({"provider_cooldowns": {}}))
+            pid_path = Path(tmpdir) / "orchestrator.pid"
+
+            argv = ["orchestrator.py", "--config", str(cfg_path), "--resume-from", "Nonexistent task text"]
+            with patch.object(sys, "argv", argv):
+                with patch("orchestrator.STATE_PATH", state_path):
+                    with patch("orchestrator.PID_PATH", pid_path):
+                        with self.assertRaises(SystemExit):
+                            main()
+
+
+class TestSigtermHandler(unittest.TestCase):
+    def test_sigterm_handler_cleans_up_and_exits_zero(self):
+        from unittest.mock import patch
+        # _set_control_state is mocked too -- calling the real one would flip
+        # the module-global _control_state["quit_requested"] permanently for
+        # the rest of the test run, breaking every later test that calls
+        # main() and checks that flag at the top of its loop.
+        with patch("orchestrator._kill_process_tree") as mock_kill:
+            with patch("orchestrator._shutdown_dashboard_server") as mock_shutdown:
+                with patch("orchestrator._remove_pid_file") as mock_remove_pid:
+                    with patch("orchestrator._set_control_state") as mock_set_control:
+                        with patch("orchestrator._current_process", None):
+                            with self.assertRaises(SystemExit) as ctx:
+                                _sigterm_handler(15, None)
+        self.assertEqual(ctx.exception.code, 0)
+        mock_shutdown.assert_called_once()
+        mock_remove_pid.assert_called_once()
+        mock_kill.assert_not_called()
+        mock_set_control.assert_called_once_with("quit_requested", True)
 
 
 if __name__ == "__main__":
