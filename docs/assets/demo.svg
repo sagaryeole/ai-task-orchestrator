@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="640" viewBox="0 0 1200 640" role="img" aria-labelledby="title desc">
-  <title id="title">Task Orchestrator Demo</title>
-  <desc id="desc">Animated terminal-style demo of task orchestration</desc>
+  <title id="title">Ai Task Orchastrator Demo</title>
+  <desc id="desc">Animated terminal-style demo of ai-task-orchastrator</desc>
   <defs>
     <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
       <stop offset="0%" stop-color="#0b1020"/>
@@ -46,7 +46,7 @@
   <circle cx="64" cy="58" r="8" fill="#ef4444"/>
   <circle cx="90" cy="58" r="8" fill="#f59e0b"/>
   <circle cx="116" cy="58" r="8" fill="#22c55e"/>
-  <text x="150" y="63" class="mono muted" font-size="18">task-orchestrator --once</text>
+  <text x="150" y="63" class="mono muted" font-size="18">ai-task-orchastrator --once</text>
 
   <g transform="translate(54,105)">
     <text x="0" y="0" class="mono txt line l1" font-size="23">[15:41:05] Providers: claude=available | copilot=available | ollama=available</text>

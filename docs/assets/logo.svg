@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="260" viewBox="0 0 1200 260" role="img" aria-labelledby="title desc">
-  <title id="title">Task Orchestrator Logo</title>
-  <desc id="desc">Task Orchestrator brand banner</desc>
+  <title id="title">Ai Task Orchastrator Logo</title>
+  <desc id="desc">Ai Task Orchastrator brand banner</desc>
   <defs>
     <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
       <stop offset="0%" stop-color="#0f172a"/>
@@ -24,7 +24,7 @@
   </g>
 
   <g transform="translate(285,74)">
-    <text x="0" y="50" font-family="Consolas, 'Cascadia Code', Menlo, monospace" font-size="58" font-weight="700" fill="#e5e7eb">Task Orchestrator</text>
+    <text x="0" y="50" font-family="Consolas, 'Cascadia Code', Menlo, monospace" font-size="58" font-weight="700" fill="#e5e7eb">Ai Task Orchastrator</text>
     <text x="0" y="100" font-family="Segoe UI, Arial, sans-serif" font-size="28" fill="#9ca3af">AI backlog automation with provider failover</text>
     <rect x="0" y="126" width="660" height="10" rx="5" fill="#1f2937"/>
     <rect x="0" y="126" width="460" height="10" rx="5" fill="url(#accent)"/>
