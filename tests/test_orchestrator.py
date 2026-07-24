@@ -23,6 +23,7 @@ from orchestrator import (
     load_config,
     git_commit,
     git_run,
+    validate_git_working_tree,
     run_verification,
     lint_config,
     lint_todo,
@@ -1233,6 +1234,25 @@ class TestGitRunRetry(unittest.TestCase):
             git_run(["status", "--porcelain"], cwd="/tmp", timeout=5)
             call_kwargs = mock_run.call_args
             self.assertEqual(call_kwargs.kwargs.get("timeout"), 5)
+
+
+class TestValidateGitWorkingTree(unittest.TestCase):
+    def test_passes_inside_git_repo(self):
+        import subprocess as sp
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sp.run(["git", "init", "-q"], cwd=tmpdir)
+            validate_git_working_tree(tmpdir)
+
+    def test_exits_when_not_inside_git_repo(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with self.assertRaises(SystemExit):
+                validate_git_working_tree(tmpdir)
+
+    def test_exits_with_clear_message_for_non_git_dir(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with self.assertRaises(SystemExit) as cm:
+                validate_git_working_tree(tmpdir)
+            self.assertIn("not inside a git working tree", str(cm.exception))
 
 
 if __name__ == "__main__":

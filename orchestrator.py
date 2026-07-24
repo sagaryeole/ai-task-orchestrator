@@ -597,6 +597,16 @@ def git_run(args, cwd=None, timeout=10):
     return result
 
 
+def validate_git_working_tree(working_directory):
+    """Fail fast if working_directory is not inside a git working tree."""
+    result = git_run(["rev-parse", "--is-inside-work-tree"], cwd=working_directory)
+    if result.returncode != 0 or result.stdout.strip().lower() != "true":
+        sys.exit(
+            f"Fatal: '{working_directory}' is not inside a git working tree. "
+            "Set a valid 'working_directory' in config.json or run from inside a git repo."
+        )
+
+
 def _git_dirty_count(working_directory):
     """Count files with uncommitted changes. None if not a git repo / on failure."""
     try:
@@ -1224,6 +1234,7 @@ def main():
     max_retries_per_provider = config.get("max_retries_per_provider", 1)
     require_confirmation = config.get("require_manual_confirmation", True)
     working_directory = config.get("working_directory", ".")
+    validate_git_working_tree(working_directory)
 
     if not todo_path.exists():
         sys.exit(f"Todo file not found: {todo_path}")
