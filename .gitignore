@@ -1,0 +1,8 @@
+state.json
+logs/
+*.env
+.env
+__pycache__/
+*.pyc
+.DS_Store
+.claude/settings.local.json
