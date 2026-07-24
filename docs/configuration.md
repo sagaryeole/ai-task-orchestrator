@@ -1,6 +1,6 @@
 # Configuration Reference
 
-Configuration is stored in `config.json` (or any path passed via `--config`).
+Configuration is stored in `task-orchestrator.config.json` (or any path passed via `--config`). This filename is gitignored by default when scaffolded via `task-orchestrator init`, since provider `env` blocks commonly hold API keys.
 
 !!! tip "IDE Autocompletion"
     Add `"$schema": "./config.schema.json"` at the top of your config file for inline validation and autocompletion in VS Code / JetBrains.

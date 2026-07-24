@@ -1568,14 +1568,17 @@ class TestInitCommand(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             result = cmd_init(tmpdir)
             self.assertEqual(result, 0)
-            self.assertTrue((Path(tmpdir) / "config.json").exists())
+            self.assertTrue((Path(tmpdir) / "task-orchestrator.config.json").exists())
             self.assertTrue((Path(tmpdir) / "Todo.md").exists())
             self.assertTrue((Path(tmpdir) / "prompts" / "task_prompt.txt").exists())
             self.assertTrue((Path(tmpdir) / ".gitignore").exists())
 
-            config = json.loads((Path(tmpdir) / "config.json").read_text())
+            config = json.loads((Path(tmpdir) / "task-orchestrator.config.json").read_text())
             self.assertIn("providers", config)
             self.assertIn("verify_commands", config)
+
+            gitignore = (Path(tmpdir) / ".gitignore").read_text()
+            self.assertIn("task-orchestrator.config.json", gitignore)
 
     def test_init_does_not_overwrite_existing_files(self):
         with tempfile.TemporaryDirectory() as tmpdir:

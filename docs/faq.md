@@ -31,7 +31,7 @@ A shell loop doesn't handle: rate-limit detection, automatic provider rotation, 
 
 ## Configuration
 
-### How do I keep API keys out of config.json?
+### How do I keep API keys out of task-orchestrator.config.json?
 
 Use environment variable interpolation:
 
@@ -39,11 +39,11 @@ Use environment variable interpolation:
 "env": {"ANTHROPIC_API_KEY": "$ANTHROPIC_API_KEY"}
 ```
 
-Set the variable in your shell profile or `.env` file (which should be in `.gitignore`).
+Set the variable in your shell profile or `.env` file (which should be in `.gitignore`). Separately, `task-orchestrator init` already gitignores `task-orchestrator.config.json` itself by default, since even with interpolation some users paste literal keys in — if you're hand-editing an existing `.gitignore`, make sure that entry is still there.
 
 ### Can I use different configs for different projects?
 
-Yes. Each project has its own `config.json`. Use `--config path/to/other.json` to point at a specific one. Global credentials in `~/.task-orchestrator/config.json` are automatically merged.
+Yes. Each project has its own `task-orchestrator.config.json`. Use `--config path/to/other.json` to point at a specific one. Global credentials in `~/.task-orchestrator/config.json` are automatically merged.
 
 ### What's the difference between `subprocess_timeout` and `stall_timeout_seconds`?
 

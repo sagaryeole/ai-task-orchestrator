@@ -109,12 +109,12 @@ Your code, your keys, your machine. Nothing leaves without you explicitly config
 - **Language:** Python 3, standard library only (`subprocess`, `json`, `re`, `time`, `pathlib`, `datetime`). No external dependencies to install.
 - **Files:**
   - `orchestrator.py` — the orchestrator itself.
-  - `config.json` — providers, delays, retry policy, verification commands.
+  - `task-orchestrator.config.json` — providers, delays, retry policy, verification commands.
   - `Todo.md` — the task backlog, using standard GitHub-flavored checkbox syntax (`- [ ]` / `- [x]`).
   - `prompts/task_prompt.txt` — template used to build the prompt sent to the agent for each task (`{{TASK}}` placeholder).
   - `state.json` — auto-created; records per-provider cooldown-until timestamps.
   - `logs/orchestrator.log` — auto-created; append-only human-readable run log.
-  - `logs/orchestrator.jsonl` — auto-created when `--json-logs` (or `"json_logs": true` in `config.json`) is set; one JSON object per line, for downstream parsing/dashboards.
+  - `logs/orchestrator.jsonl` — auto-created when `--json-logs` (or `"json_logs": true` in `task-orchestrator.config.json`) is set; one JSON object per line, for downstream parsing/dashboards.
 - **Providers:** each is a plain CLI launch — a command string plus an environment variable overlay (API keys, base URLs) plus a list of substrings/regex fragments that indicate a rate limit was hit. This makes a "provider" nothing more than "however you'd normally invoke your agent CLI with a specific model/backend," so it works with Anthropic's API, OpenRouter, Nvidia NIM's OpenAI-compatible endpoint, a local LM Studio server, or anything else reachable via a CLI flag or env var.
 - **Process model:** each task attempt is a synchronous subprocess call. By default the prompt is piped to the agent CLI's stdin; if a provider's `command` contains a literal `{{TASK}}` token instead, the full prompt is substituted there as a single argv element and stdin is left empty (needed for CLIs like GitHub Copilot CLI, whose `-p <text>` takes the prompt as an argument, not stdin). Combined stdout/stderr is captured for rate-limit detection and printed live to the terminal.
 - **State machine per task:** pick provider → run → check for rate-limit pattern → (if limited) cooldown that provider and rotate to next → (if not limited) verify → confirm/auto-accept → mark complete or retry/give up → sleep `delay_seconds` → next task.
@@ -157,7 +157,7 @@ Todo.md ──► next unchecked task
 
 If every provider is on cooldown at once, the orchestrator sleeps until the earliest cooldown expires, then re-checks — it never gives up as long as at least one provider will eventually free up.
 
-### Configuration reference (`config.json`)
+### Configuration reference (`task-orchestrator.config.json`)
 
 | Field | Purpose |
 |---|---|
@@ -183,7 +183,7 @@ Each entry in `providers`:
 | `rate_limit_patterns` | Lowercase substrings checked against the CLI's combined stdout/stderr; a match marks the provider exhausted |
 | `cooldown_seconds` | How long an exhausted provider is skipped before being retried |
 
-The shipped `config.json` includes four example providers — `openrouter-free`, `anthropic-claude`, `nvidia-nim`, and `lmstudio-local` — as a starting template. The `command` strings and `rate_limit_patterns` are placeholders; they need to be adjusted to match your actual CLI's flags and the exact wording it prints on a rate limit, since that wording varies by tool and provider.
+See `examples/` for ready-to-copy provider configs (`claude.json`, `copilot.json`, `multi-provider.json`) covering CLIs like `openrouter-free`, `anthropic-claude`, `nvidia-nim`, and `lmstudio-local`-style setups. The `command` strings and `rate_limit_patterns` in those examples are placeholders; they need to be adjusted to match your actual CLI's flags and the exact wording it prints on a rate limit, since that wording varies by tool and provider. `task-orchestrator.config.json` itself is gitignored by default (see `init`) since providers commonly hold API keys.
 
 ### Optional fields
 
@@ -239,7 +239,7 @@ By default this uses whatever models your logged-in Copilot account has access t
 
 ## Usage
 
-1. Fill in real API keys and correct CLI flags in `config.json` for each provider you want to use; set `enabled: false` on any you don't.
+1. Fill in real API keys and correct CLI flags in `task-orchestrator.config.json` for each provider you want to use; set `enabled: false` on any you don't.
 2. Edit `Todo.md` with your real task list.
 3. Run:
    ```
@@ -295,7 +295,7 @@ Prerequisites:
 
 ### Subcommands
 
-- `task-orchestrator init` — scaffold a new project's `config.json`, `Todo.md`, `prompts/task_prompt.txt`, and `.gitignore` in the current directory (never overwrites existing files)
+- `task-orchestrator init` — scaffold a new project's `task-orchestrator.config.json`, `Todo.md`, `prompts/task_prompt.txt`, and `.gitignore` in the current directory (never overwrites existing files)
 - `task-orchestrator validate` — check config structure, provider executable reachability, git working tree, and `Todo.md` presence, without running anything
 
 ## Known Limitations / Follow-ups
@@ -314,7 +314,7 @@ Prerequisites:
 
 **What this means for you**: Don't point the orchestrator at an untrusted Todo.md (e.g. one that could be modified by an attacker). In a CI context, ensure the Todo.md source is protected by the same access controls as your code.
 
-**Secret handling**: Provider `env` values that look like API keys are redacted from log output. Use `$VAR_NAME` interpolation in config to avoid storing secrets on disk at all.
+**Secret handling**: Provider `env` values that look like API keys are redacted from log output. Use `$VAR_NAME` interpolation in config to avoid storing secrets on disk at all. `task-orchestrator init` also gitignores `task-orchestrator.config.json` by default, so even a literal key pasted into `env` doesn't get committed by accident — if you're adding the config to an existing project's `.gitignore` by hand, make sure that entry is there.
 
 ## Providers Compatibility Matrix
 
@@ -333,7 +333,7 @@ A minimal local dashboard is served via Python's stdlib `http.server` — no ext
 
 ### Enabling
 
-Set `dashboard_port` in `config.json` to the port you want the dashboard to listen on:
+Set `dashboard_port` in `task-orchestrator.config.json` to the port you want the dashboard to listen on:
 
 ```json
 {
@@ -357,7 +357,7 @@ Optional dashboard config:
 
 ## Interactive Commands (Optional)
 
-Set `interactive_commands: true` in `config.json` to enable non-blocking keyboard commands during runs in an interactive terminal:
+Set `interactive_commands: true` in `task-orchestrator.config.json` to enable non-blocking keyboard commands during runs in an interactive terminal:
 
 - `p` then Enter — pause after current task
 - `r` then Enter — resume from pause

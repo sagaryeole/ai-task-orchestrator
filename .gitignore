@@ -1,3 +1,7 @@
+task-orchestrator.config.json
+task-orchestrator.config.json.bak
+config.json
+config.json.bak
 state.json
 orchestrator.pid
 logs/
@@ -7,5 +11,4 @@ __pycache__/
 *.pyc
 .DS_Store
 .claude/settings.local.json
-config.json.bak
 *.lock

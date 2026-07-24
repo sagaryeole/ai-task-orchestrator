@@ -8,7 +8,7 @@ An AI-agnostic orchestrator (single file, `orchestrator.py`) that drives a codin
 
 Pure Python 3 standard library only (`subprocess`, `json`, `re`, `time`, `threading`, `pathlib`, `datetime`, `argparse`) — no dependencies to install, no build step.
 
-**This repo dogfoods itself**: `config.json` here targets this repo's own `Todo.md`, so `orchestrator.py` can be used to drive its own development. Be aware when editing `orchestrator.py` that a running instance may have this file open as its own target.
+**This repo dogfoods itself**: a local `task-orchestrator.config.json` (gitignored — not checked in) targets this repo's own `Todo.md`, so `orchestrator.py` can be used to drive its own development. Be aware when editing `orchestrator.py` that a running instance may have this file open as its own target.
 
 ## Running it
 
@@ -31,7 +31,7 @@ python3 -m unittest tests.test_orchestrator.TestProviderAvailability   # a singl
 python3 -m unittest tests.test_orchestrator.TestProviderAvailability.test_mark_exhausted  # a single test
 ```
 
-This is also `verify_commands` in `config.json` — it runs after every task the agent completes, so a broken test blocks a task from being auto-accepted. Keep it fast; it's on the critical path of every single task.
+This is also `verify_commands` in `task-orchestrator.config.json` — it runs after every task the agent completes, so a broken test blocks a task from being auto-accepted. Keep it fast; it's on the critical path of every single task.
 
 Tests that touch persisted state must patch `orchestrator.STATE_PATH` to a tempdir (`unittest.mock.patch`) rather than let `save_state()` hit the real `state.json` — a test that doesn't do this will silently corrupt live provider-cooldown data on every run.
 
@@ -41,7 +41,7 @@ To exercise a change by hand without waiting on a real agent CLI: point one `pro
 
 Everything lives in `orchestrator.py`; there's no package structure.
 
-- **`Provider`** (class) — wraps one entry from `config.json`'s `providers[]` list: CLI `command`, an `env` overlay merged onto the current process env, lowercase `rate_limit_patterns` matched against combined stdout/stderr, `cooldown_seconds`, an optional per-task `subprocess_timeout` override, and a `stall_timeout` (default 600s). `Provider.run()` launches the subprocess with `start_new_session=True` (its own process group) and hands off to `_wait_for_result()`.
+- **`Provider`** (class) — wraps one entry from the config's `providers[]` list: CLI `command`, an `env` overlay merged onto the current process env, lowercase `rate_limit_patterns` matched against combined stdout/stderr, `cooldown_seconds`, an optional per-task `subprocess_timeout` override, and a `stall_timeout` (default 600s). `Provider.run()` launches the subprocess with `start_new_session=True` (its own process group) and hands off to `_wait_for_result()`.
 - **`_wait_for_result()`** runs `process.communicate()` on a background thread and polls in the foreground so the terminal isn't silent for the whole task. Each poll tick (every 0.2s): refreshes CPU%/git-dirty-count every `heartbeat_interval` (3s), writes a heartbeat log line every `log_heartbeat_interval` (30s) to `logs/orchestrator.log` (and `logs/orchestrator.jsonl` if `--json-logs`), and — **only when `sys.stdout.isatty()` is true** — redraws a live `\r`-updating status line (spinner, elapsed time, cpu%, files changed, idle time). That live spinner is intentionally suppressed when stdout isn't a real terminal (piped, redirected, `nohup`, backgrounded) so log files never get raw escape/carriage-return bytes in them — the 30s heartbeat log line is the thing to tail (`tail -f logs/orchestrator.log`) for unattended/overnight runs, not the spinner.
 - **Two independent timeout mechanisms, not one**: `subprocess_timeout` (wall-clock, can be `null` for "no limit" — needed for genuinely big tasks) vs. `stall_timeout_seconds` (activity-based — fires only when there's been no CPU activity above `STALL_CPU_THRESHOLD` *and* no change in git-dirty-file-count for that long, regardless of wall-clock elapsed). A big task that's actively working never trips the stall timeout even with `subprocess_timeout: null`; a small task that hangs trips the stall timeout long before any wall-clock limit would. `subprocess_timeout_overrides` applies a longer wall-clock limit to tasks tagged `[big]`/`[slow]` etc. in their Todo.md text (`get_task_timeout()`, matched via `TAG_REGEX`).
 - **On timeout or detected stall**, `os.killpg(os.getpgid(pid), SIGKILL)` kills the whole process group, not just `Popen.kill()` — some agent CLIs (Kilo included) spawn a detached grandchild worker that `Popen.kill()` alone leaves orphaned.
@@ -56,7 +56,7 @@ Everything lives in `orchestrator.py`; there's no package structure.
 - **Exit codes are a deliberate contract with `run_forever.sh`**: `0` = clean/intentional finish (all tasks done, or normal exit) → don't restart; `130` = SIGINT (`_sigint_handler` also kills any in-flight agent subprocess group before exiting) → don't restart; anything else (unhandled crash) → restart after a 10s pause. Never change these without updating the supervisor script to match.
 - `lint_config()` / `lint_todo()` run at startup and warn (not fail) on common misconfigurations — e.g. a provider `command` that looks like it launches an interactive TUI (`_INTERACTIVE_LAUNCHERS`) without the flags needed for non-interactive/stdin-driven use.
 
-## Configuration (`config.json`)
+## Configuration (`task-orchestrator.config.json`)
 
 See README's "Configuration reference" for the full field list. Non-obvious ones:
 

@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **BREAKING: default config filename renamed** from `config.json` to `task-orchestrator.config.json` — `config.json` is a generic name likely to collide with another tool's config in the same repo, and its genericness made it easy to gitignore-miss. Existing users must rename their file (`mv config.json task-orchestrator.config.json`) or pass `--config config.json` explicitly; there is no automatic fallback.
+- `task-orchestrator init` now gitignores the config file it scaffolds by default — provider `env` blocks commonly hold API keys (directly or via `$VAR` interpolation), so the config should not be committed by default.
+
 ## [2.0.0] - 2026-07-24
 
 ### Added

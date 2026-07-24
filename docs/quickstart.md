@@ -27,14 +27,14 @@ task-orchestrator init
 
 This creates:
 
-- `config.json` — provider configuration
+- `task-orchestrator.config.json` — provider configuration (gitignored by default — it commonly holds API keys)
 - `Todo.md` — your task backlog
 - `prompts/task_prompt.txt` — prompt template
 - `.gitignore` — excludes runtime files
 
 ## Configure a Provider
 
-Edit `config.json` and set your agent CLI command:
+Edit `task-orchestrator.config.json` and set your agent CLI command:
 
 === "GitHub Copilot"
 
