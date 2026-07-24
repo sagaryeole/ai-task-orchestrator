@@ -39,7 +39,7 @@ Prompting the agent itself to "wait 60 seconds and then continue" doesn't work �
   - `logs/orchestrator.log` — auto-created; append-only human-readable run log.
   - `logs/orchestrator.jsonl` — auto-created when `--json-logs` (or `"json_logs": true` in `config.json`) is set; one JSON object per line, for downstream parsing/dashboards.
 - **Providers:** each is a plain CLI launch — a command string plus an environment variable overlay (API keys, base URLs) plus a list of substrings/regex fragments that indicate a rate limit was hit. This makes a "provider" nothing more than "however you'd normally invoke your agent CLI with a specific model/backend," so it works with Anthropic's API, OpenRouter, Nvidia NIM's OpenAI-compatible endpoint, a local LM Studio server, or anything else reachable via a CLI flag or env var.
-- **Process model:** each task attempt is a synchronous subprocess call — the prompt is piped to the agent CLI's stdin, and its combined stdout/stderr is captured for rate-limit detection and printed live to the terminal.
+- **Process model:** each task attempt is a synchronous subprocess call. By default the prompt is piped to the agent CLI's stdin; if a provider's `command` contains a literal `{{TASK}}` token instead, the full prompt is substituted there as a single argv element and stdin is left empty (needed for CLIs like GitHub Copilot CLI, whose `-p <text>` takes the prompt as an argument, not stdin). Combined stdout/stderr is captured for rate-limit detection and printed live to the terminal.
 - **State machine per task:** pick provider → run → check for rate-limit pattern → (if limited) cooldown that provider and rotate to next → (if not limited) verify → confirm/auto-accept → mark complete or retry/give up → sleep `delay_seconds` → next task.
 
 ## Solution / How It Works
@@ -101,7 +101,7 @@ Each entry in `providers`:
 |---|---|
 | `name` | Identifier used in logs and `state.json` |
 | `enabled` | Set `false` to exclude a provider without deleting it |
-| `command` | The CLI invocation for this provider (flags for model, base URL, etc.) |
+| `command` | The CLI invocation for this provider (flags for model, base URL, etc.). Reads the prompt from stdin by default; include a literal `{{TASK}}` token to have the prompt passed as an argv element instead (for CLIs that take the prompt as a flag argument, not stdin) |
 | `env` | Environment variables merged on top of the current environment (API keys, base URLs) |
 | `rate_limit_patterns` | Lowercase substrings checked against the CLI's combined stdout/stderr; a match marks the provider exhausted |
 | `cooldown_seconds` | How long an exhausted provider is skipped before being retried |
@@ -137,6 +137,29 @@ Example:
 }
 ```
 
+### Worked example: GitHub Copilot CLI
+
+[GitHub Copilot CLI](https://docs.github.com/copilot/concepts/agents/about-copilot-cli) (`copilot`) works as a provider and has been verified end-to-end (real task run via `--once`, file created, task marked complete).
+
+**Requirements:**
+
+- Install it and authenticate once, outside the orchestrator: `copilot login` (interactive; the orchestrator itself only ever runs it non-interactively).
+- Unlike `kilo`/`claude`, Copilot CLI's `-p/--prompt` flag takes the prompt as a CLI argument, not stdin — so `command` **must** include the literal `{{TASK}}` token (see the `command` field note above). Without it, the orchestrator would pipe the prompt to stdin as usual and Copilot would just sit there with no prompt.
+- `--allow-all-tools` is required for non-interactive use (Copilot CLI prompts for tool approval by default; the startup linter warns if it's missing). `--no-ask-user` additionally stops it from pausing mid-task to ask a clarifying question — since nothing is watching an unattended run, always include it. `-s`/`--silent` keeps its output free of progress decoration, which matters for the rate-limit/suspicious-completion substring checks.
+
+```json
+{
+  "name": "copilot",
+  "enabled": true,
+  "command": "copilot --allow-all-tools --no-ask-user -s -p {{TASK}}",
+  "env": {},
+  "rate_limit_patterns": ["rate limit", "429", "quota exceeded", "too many requests"],
+  "cooldown_seconds": 300
+}
+```
+
+By default this uses whatever models your logged-in Copilot account has access to. Copilot CLI also supports pointing at a custom OpenAI-compatible endpoint (a local LM Studio server, or a gateway like OmniRoute) via `COPILOT_PROVIDER_BASE_URL` / `COPILOT_PROVIDER_TYPE` / `COPILOT_PROVIDER_API_KEY` / `COPILOT_MODEL` in the provider's `env` — not wired up yet here, but the mechanism is documented and works the same way as any other provider's `env` overlay.
+
 ## Usage
 
 1. Fill in real API keys and correct CLI flags in `config.json` for each provider you want to use; set `enabled: false` on any you don't.
@@ -159,6 +182,7 @@ Example:
 
 - Rate-limit detection is text-pattern matching against CLI output, not a structured API response — patterns need to be tuned per tool/provider and may need updates if a CLI changes its error wording.
 - Providers are tried round-robin by default, but you can set a `priority` field to prefer specific providers (higher = preferred).
+- "Did the agent actually do anything?" (used to catch false-success completions and to confirm a rate-limit pattern match wasn't a false positive on real work) is decided via `git status --porcelain` in `working_directory`. That means any file your own tooling leaves untracked in that directory looks like "the agent changed something" — make sure `state.json`, `orchestrator.pid`, and `logs/` (all auto-created) are in `.gitignore`, or every task will look suspicious-free/rate-limit-free even when it isn't.
 
 ## Dashboard
 

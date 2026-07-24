@@ -1,4 +1,5 @@
 state.json
+orchestrator.pid
 logs/
 *.env
 .env

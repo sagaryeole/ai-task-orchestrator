@@ -297,13 +297,24 @@ def log(msg, color=None):
             f.write(line + "\n")  # plain text on disk -- no escape codes in the log file
 
 
+def _applescript_escape(text):
+    """Escape a string for safe interpolation into a double-quoted AppleScript
+    literal. Without this, a title/message containing a double quote (e.g. a
+    task description quoting something) breaks out of the string and the rest
+    is parsed as AppleScript -- task text isn't trusted input, so this isn't
+    just a cosmetic crash risk."""
+    return text.replace("\\", "\\\\").replace('"', '\\"')
+
+
 def notify(title, message):
     """Fire-and-forget desktop notification. Uses osascript on macOS,
     notify-send on Linux when available, otherwise silently does nothing."""
     try:
         if sys.platform == "darwin":
+            safe_message = _applescript_escape(message)
+            safe_title = _applescript_escape(title)
             subprocess.run(
-                ["osascript", "-e", f'display notification "{message}" with title "{title}"'],
+                ["osascript", "-e", f'display notification "{safe_message}" with title "{safe_title}"'],
                 capture_output=True, timeout=5,
             )
         elif sys.platform.startswith("linux"):
@@ -1193,14 +1204,17 @@ def run_provider_stats(provider, working_directory: str, task: str):
 # --------------------------------------------------------------------------
 
 def _sigint_handler(signum, frame):
-    log("Interrupted by user (SIGINT). Saving state and exiting...", color="yellow")
+    # state.json/Todo.md are already written to disk immediately on every
+    # change (see the crash handler below), never batched in memory -- so
+    # there's nothing left to flush here. This just needs to stop the
+    # in-flight subprocess and clean up before exiting.
+    log("Interrupted by user (SIGINT). Exiting...", color="yellow")
     if _current_process is not None:
         try:
             os.killpg(os.getpgid(_current_process.pid), signal.SIGKILL)
             log(f"Killed in-flight agent subprocess group (pid {_current_process.pid}).", color="yellow")
         except (ProcessLookupError, PermissionError):
             pass
-    save_state(load_state())
     _remove_pid_file()
     # 130 is the conventional exit code for a SIGINT-terminated process. A
     # supervisor script uses this to tell "user asked to stop" apart from
@@ -1277,235 +1291,249 @@ def main():
 
     try:
         if args.dry_run:
-        tasks = load_tasks(todo_path, skip_sections=args.skip_section)
-        if not tasks:
-            log("Dry-run: no pending tasks.")
-            log_json("dry_run", no_tasks=True)
-            return
+            tasks = load_tasks(todo_path, skip_sections=args.skip_section)
+            if not tasks:
+                log("Dry-run: no pending tasks.")
+                log_json("dry_run", no_tasks=True)
+                return
 
-        task = tasks[0]
-        provider, idx = pick_next_provider(providers, state, 0)
-        if provider is None:
-            wait_s = seconds_until_next_available(providers, state)
-            log(f"Dry-run: all providers exhausted. Next available in {wait_s}s.")
-            log_json("dry_run", all_exhausted=True, wait_seconds=wait_s)
-        else:
-            log(f"Dry-run: would run task via provider '{provider.name}'.")
-            log(f"  Task   : {task}")
-            log(f"  Command: {provider.command}")
-            log(f"  Cooldown remaining: {max(0, int(state['provider_cooldowns'].get(provider.name, 0) - time.time()))}s")
-            log_json("dry_run", provider=provider.name, task=task, wait_seconds=max(0, int(state['provider_cooldowns'].get(provider.name, 0) - time.time())))
-        return
-
-    if args.summary:
-        print_summary(state, todo_path)
-        return
-
-    if args.skip_section:
-        log(f"Skipping sections: {', '.join(args.skip_section)}", color="yellow")
-
-    provider_idx = 0  # round-robin cursor across tasks
-
-    while True:
-        tasks = load_tasks(todo_path, skip_sections=args.skip_section)
-        if not tasks:
-            print_progress(todo_path, state, skip_sections=args.skip_section)
-            log("All tasks completed. Exiting.", color="bold_green")
-            notify("All tasks completed", "All tasks in Todo.md are done")
-            break
-
-        task = tasks[0]
-        task_start_time = time.time()
-        log("=" * 60, color="dim")
-        log(f"Starting task: {task}", color="bold_green")
-        print_progress(todo_path, state, skip_sections=args.skip_section)
-        log_json("task_start", task=task, provider_idx=provider_idx)
-        update_dashboard_state(
-            current_task=task,
-            current_provider=None,
-            provider_status=build_provider_status(providers, state),
-        )
-
-        prompt = build_prompt(task, prompt_template)
-        task_timeout = get_task_timeout(task, subprocess_timeout, timeout_overrides)
-        if task_timeout != subprocess_timeout:
-            log(f"Task timeout override: {task_timeout}s (global: {subprocess_timeout}s)", color="magenta")
-        task_done = False
-
-        while not task_done:
-            provider, idx = pick_next_provider(providers, state, provider_idx)
-
+            task = tasks[0]
+            provider, idx = pick_next_provider(providers, state, 0)
             if provider is None:
                 wait_s = seconds_until_next_available(providers, state)
-                log(f"All providers exhausted. Sleeping {wait_s}s until one frees up...", color="yellow")
-                notify("All providers exhausted", f"Sleeping {wait_s}s until a provider is available")
-                time.sleep(wait_s + 1)
-                continue  # re-check availability
+                log(f"Dry-run: all providers exhausted. Next available in {wait_s}s.")
+                log_json("dry_run", all_exhausted=True, wait_seconds=wait_s)
+            else:
+                log(f"Dry-run: would run task via provider '{provider.name}'.")
+                log(f"  Task   : {task}")
+                log(f"  Command: {provider.command}")
+                log(f"  Cooldown remaining: {max(0, int(state['provider_cooldowns'].get(provider.name, 0) - time.time()))}s")
+                log_json("dry_run", provider=provider.name, task=task, wait_seconds=max(0, int(state['provider_cooldowns'].get(provider.name, 0) - time.time())))
+            return
 
-            provider_idx = idx  # remember where we are for next round
-            log(f"Using provider: {provider.name}", color="cyan")
-            log_json("provider_selected", provider=provider.name, index=idx)
+        if args.summary:
+            print_summary(state, todo_path)
+            return
+
+        if args.skip_section:
+            log(f"Skipping sections: {', '.join(args.skip_section)}", color="yellow")
+
+        provider_idx = 0  # round-robin cursor across tasks
+
+        while True:
+            tasks = load_tasks(todo_path, skip_sections=args.skip_section)
+            if not tasks:
+                print_progress(todo_path, state, skip_sections=args.skip_section)
+                log("All tasks completed. Exiting.", color="bold_green")
+                notify("All tasks completed", "All tasks in Todo.md are done")
+                break
+
+            task = tasks[0]
+            task_start_time = time.time()
+            log("=" * 60, color="dim")
+            log(f"Starting task: {task}", color="bold_green")
+            print_progress(todo_path, state, skip_sections=args.skip_section)
+            log_json("task_start", task=task, provider_idx=provider_idx)
             update_dashboard_state(
-                current_provider=provider.name,
+                current_task=task,
+                current_provider=None,
                 provider_status=build_provider_status(providers, state),
             )
 
-            attempt_success = False
-            for attempt in range(1, max_retries_per_provider + 1):
-                log(f"[{provider.name}] attempt {attempt}/{max_retries_per_provider}", color="dim")
-                exit_code, output, rate_limited = provider.run(prompt, working_directory, task_timeout)
+            prompt = build_prompt(task, prompt_template)
+            task_timeout = get_task_timeout(task, subprocess_timeout, timeout_overrides)
+            if task_timeout != subprocess_timeout:
+                log(f"Task timeout override: {task_timeout}s (global: {subprocess_timeout}s)", color="magenta")
+            task_done = False
 
-                # rate_limited is just a substring match over the CLI's combined
-                # output -- in this repo specifically, task text and generated code
-                # routinely contain "rate limit", "429", "quota" etc. as *domain
-                # vocabulary*, not as a real rate-limit error. Confirm it against
-                # the working tree before trusting it: a real rate-limit hit means
-                # the agent didn't get to do anything, so if files actually changed,
-                # this was a false positive on a genuine completion, not a real
-                # exhaustion event.
-                diff_stat = git_run(["diff", "--stat"], cwd=working_directory)
-                stat_output = diff_stat.stdout.strip() if diff_stat.returncode == 0 else ""
-                rate_limited = rate_limited and not stat_output
+            while not task_done:
+                provider, idx = pick_next_provider(providers, state, provider_idx)
 
-                exit_color = "yellow" if rate_limited else ("green" if exit_code == 0 else "red")
-                log(f"[{provider.name}] exit code {exit_code}"
-                    + (" (looked rate-limited)" if rate_limited else ""), color=exit_color)
+                if provider is None:
+                    wait_s = seconds_until_next_available(providers, state)
+                    log(f"All providers exhausted. Sleeping {wait_s}s until one frees up...", color="yellow")
+                    notify("All providers exhausted", f"Sleeping {wait_s}s until a provider is available")
+                    time.sleep(wait_s + 1)
+                    continue  # re-check availability
 
-                if rate_limited:
-                    provider.mark_exhausted(state, reason="rate_limited")
-                    log_json("provider_exhausted", provider=provider.name, reason="rate_limited")
-                    log(f"Providers: {print_provider_status(providers, state)}", color="blue")
-                    break  # stop retrying this provider, rotate to next
-                else:
+                provider_idx = idx  # remember where we are for next round
+                log(f"Using provider: {provider.name}", color="cyan")
+                log_json("provider_selected", provider=provider.name, index=idx)
+                update_dashboard_state(
+                    current_provider=provider.name,
+                    provider_status=build_provider_status(providers, state),
+                )
+
+                attempt_success = False
+                for attempt in range(1, max_retries_per_provider + 1):
+                    log(f"[{provider.name}] attempt {attempt}/{max_retries_per_provider}", color="dim")
+                    exit_code, output, rate_limited = provider.run(prompt, working_directory, task_timeout)
+
+                    # rate_limited is just a substring match over the CLI's combined
+                    # output -- in this repo specifically, task text and generated code
+                    # routinely contain "rate limit", "429", "quota" etc. as *domain
+                    # vocabulary*, not as a real rate-limit error. Confirm it against
+                    # the working tree before trusting it: a real rate-limit hit means
+                    # the agent didn't get to do anything, so if files actually changed,
+                    # this was a false positive on a genuine completion, not a real
+                    # exhaustion event.
+                    # `git diff --stat` only sees changes to already-tracked files --
+                    # it's blind to brand-new files, which is exactly what a task like
+                    # "create X" produces. `git status --porcelain` catches new/modified/
+                    # deleted/untracked alike, so it's the only reliable "did anything
+                    # actually happen" signal here.
+                    diff_stat = git_run(["status", "--porcelain"], cwd=working_directory)
+                    stat_output = diff_stat.stdout.strip() if diff_stat.returncode == 0 else ""
+                    rate_limited = rate_limited and not stat_output
+
+                    exit_color = "yellow" if rate_limited else ("green" if exit_code == 0 else "red")
+                    log(f"[{provider.name}] exit code {exit_code}"
+                        + (" (looked rate-limited)" if rate_limited else ""), color=exit_color)
+
+                    if rate_limited:
+                        provider.mark_exhausted(state, reason="rate_limited")
+                        log_json("provider_exhausted", provider=provider.name, reason="rate_limited")
+                        log(f"Providers: {print_provider_status(providers, state)}", color="blue")
+                        break  # stop retrying this provider, rotate to next
+                    else:
+                        provider.reset_rate_limit_count(state)
+
+                    if exit_code == 124:
+                        # Timed out -- we already know it didn't finish, so there's
+                        # nothing meaningful to confirm. Treat it like any other
+                        # failed attempt instead of asking "mark complete?".
+                        log(f"[{provider.name}] timed out before finishing -- treating as a failed attempt.", color="bold_red")
+                        continue
+
+                    verified = run_verification(config)
+
+                    # exit_code == 0 alone isn't proof a task actually did anything --
+                    # a real incident: kilo reported success on a task and had made
+                    # zero edits. Treat a "success" with no changes as suspicious rather
+                    # than trusting it at face value, in both confirmation modes.
+                    suspicious = exit_code == 0 and diff_stat.returncode == 0 and not stat_output
+                    if suspicious:
+                        log(f"[{provider.name}] SUSPICIOUS: exit code 0 but no files changed -- "
+                            "this looks like a false success, not a real completion.", color="bold_red")
+                        log_json("suspicious_completion", provider=provider.name, task=task)
+
+                    if require_confirmation:
+                        notify("Task needs confirmation", f"Task: {task}\nProvider: {provider.name}")
+                        if stat_output:
+                            log("Working tree changes (git status --porcelain):\n" + stat_output, color="yellow")
+                        # verify_commands failing was previously silent here --
+                        # a human could hit 'y' out of habit past the log output
+                        # and mark a task complete despite failing tests, even
+                        # though the unattended path below correctly blocks on
+                        # this. Surface it in the prompt itself, same as the
+                        # existing suspicious-completion warning.
+                        if not verified:
+                            prompt_label = "mark complete despite VERIFICATION FAILURE?"
+                        elif suspicious:
+                            prompt_label = "mark complete despite NO changes detected?"
+                        else:
+                            prompt_label = "mark complete?"
+                        answer = input(
+                            style(f"\nTask '{task}' via '{provider.name}' — {prompt_label} "
+                                  "(y/n/retry/skip-provider/skip-task): ",
+                                  "bold_red" if (suspicious or not verified) else "bold_cyan")
+                        ).strip().lower()
+                        if answer == "y":
+                            attempt_success = True
+                            break
+                        elif answer == "retry":
+                            continue
+                        elif answer == "skip-provider":
+                            provider.mark_exhausted(state, reason="skip")
+                            log(f"Providers: {print_provider_status(providers, state)}", color="blue")
+                            break
+                        elif answer == "skip-task":
+                            defer_task(todo_path, task)
+                            log(f"Task deferred to end of todo list: {task}", color="yellow")
+                            task_done = True
+                            break
+                        else:
+                            log("Task left pending by user choice.", color="yellow")
+                            break
+                    else:
+                        if exit_code == 0 and verified and not suspicious:
+                            attempt_success = True
+                            break
+                        elif suspicious:
+                            log(f"[{provider.name}] Not auto-completing a suspicious result -- "
+                                "treating as a failed attempt.", color="bold_red")
+                            # falls through to the same retry/defer path as any other failure
+                        # non-rate-limit failure: retry same provider up to max_retries_per_provider
+
+                if attempt_success:
                     provider.reset_rate_limit_count(state)
-
-                if exit_code == 124:
-                    # Timed out -- we already know it didn't finish, so there's
-                    # nothing meaningful to confirm. Treat it like any other
-                    # failed attempt instead of asking "mark complete?".
-                    log(f"[{provider.name}] timed out before finishing -- treating as a failed attempt.", color="bold_red")
+                    mark_complete(todo_path, task)
+                    duration = time.time() - task_start_time
+                    durations = state.get("completed_task_durations", [])
+                    durations.append(duration)
+                    state["completed_task_durations"] = durations[-200:]
+                    save_state(state)
+                    git_commit(config, task)
+                    run_provider_stats(provider, working_directory, task)
+                    log(f"Task marked complete: {task} (provider: {provider.name})", color="bold_green")
+                    print_progress(todo_path, state, skip_sections=args.skip_section)
+                    log_json("task_complete", task=task, provider=provider.name)
+                    update_dashboard_state(
+                        current_task=None,
+                        current_provider=None,
+                        provider_status=build_provider_status(providers, state),
+                        history_entry={
+                            "task": task,
+                            "provider": provider.name,
+                            "status": "complete",
+                            "timestamp": datetime.datetime.now().isoformat(),
+                        },
+                    )
+                    task_done = True
+                    provider_idx = (idx + 1) % len(providers)  # rotate for load balancing
+                    log(f"Providers: {print_provider_status(providers, state)}", color="blue")
+                elif provider.is_available(state):
+                    # Failed for a non-rate-limit reason and user didn't want a retry -> give up on task
+                    log(f"Task NOT completed: {task}", color="bold_red")
+                    log_json("task_failed", task=task, provider=provider.name)
+                    update_dashboard_state(
+                        current_task=None,
+                        current_provider=None,
+                        provider_status=build_provider_status(providers, state),
+                        history_entry={
+                            "task": task,
+                            "provider": provider.name,
+                            "status": "failed",
+                            "timestamp": datetime.datetime.now().isoformat(),
+                        },
+                    )
+                    if not config.get("continue_on_failure", True):
+                        log("Stopping (continue_on_failure=false).", color="bold_red")
+                        notify("Orchestrator stopped", f"Task failed: {task}\ncontinue_on_failure=false")
+                        log_json("stop")
+                        return
+                    # Defer it to the end, still unchecked, rather than leaving it at
+                    # index 0 -- otherwise this exact task gets retried forever on
+                    # every loop iteration and nothing else in the backlog ever runs.
+                    defer_task(todo_path, task)
+                    task_done = True  # move on to next task in Todo.md
+                else:
+                    # Provider just got marked exhausted -> loop again to pick the next one immediately
+                    log(f"Rotating away from exhausted provider '{provider.name}'...", color="yellow")
+                    log_json("provider_exhausted", provider=provider.name)
+                    provider_idx = (idx + 1) % len(providers)
+                    update_dashboard_state(
+                        provider_status=build_provider_status(providers, state),
+                    )
+                    log(f"Providers: {print_provider_status(providers, state)}", color="blue")
                     continue
 
-                verified = run_verification(config)
+            log(f"Waiting {delay} seconds before next task...", color="dim")
+            time.sleep(delay)
 
-                # exit_code == 0 alone isn't proof a task actually did anything --
-                # a real incident: kilo reported success on a task and had made
-                # zero edits. Treat a "success" with no changes as suspicious rather
-                # than trusting it at face value, in both confirmation modes.
-                suspicious = exit_code == 0 and diff_stat.returncode == 0 and not stat_output
-                if suspicious:
-                    log(f"[{provider.name}] SUSPICIOUS: exit code 0 but no files changed -- "
-                        "this looks like a false success, not a real completion.", color="bold_red")
-                    log_json("suspicious_completion", provider=provider.name, task=task)
-
-                if require_confirmation:
-                    notify("Task needs confirmation", f"Task: {task}\nProvider: {provider.name}")
-                    if stat_output:
-                        log("Working tree changes (git diff --stat):\n" + stat_output, color="yellow")
-                    prompt_label = (
-                        "mark complete despite NO changes detected?" if suspicious else "mark complete?"
-                    )
-                    answer = input(
-                        style(f"\nTask '{task}' via '{provider.name}' — {prompt_label} "
-                              "(y/n/retry/skip-provider/skip-task): ",
-                              "bold_red" if suspicious else "bold_cyan")
-                    ).strip().lower()
-                    if answer == "y":
-                        attempt_success = True
-                        break
-                    elif answer == "retry":
-                        continue
-                    elif answer == "skip-provider":
-                        provider.mark_exhausted(state, reason="skip")
-                        log(f"Providers: {print_provider_status(providers, state)}", color="blue")
-                        break
-                    elif answer == "skip-task":
-                        defer_task(todo_path, task)
-                        log(f"Task deferred to end of todo list: {task}", color="yellow")
-                        task_done = True
-                        break
-                    else:
-                        log("Task left pending by user choice.", color="yellow")
-                        break
-                else:
-                    if exit_code == 0 and verified and not suspicious:
-                        attempt_success = True
-                        break
-                    elif suspicious:
-                        log(f"[{provider.name}] Not auto-completing a suspicious result -- "
-                            "treating as a failed attempt.", color="bold_red")
-                        # falls through to the same retry/defer path as any other failure
-                    # non-rate-limit failure: retry same provider up to max_retries_per_provider
-
-            if attempt_success:
-                provider.reset_rate_limit_count(state)
-                mark_complete(todo_path, task)
-                duration = time.time() - task_start_time
-                durations = state.get("completed_task_durations", [])
-                durations.append(duration)
-                state["completed_task_durations"] = durations[-200:]
-                save_state(state)
-                git_commit(config, task)
-                run_provider_stats(provider, working_directory, task)
-                log(f"Task marked complete: {task} (provider: {provider.name})", color="bold_green")
-                print_progress(todo_path, state, skip_sections=args.skip_section)
-                log_json("task_complete", task=task, provider=provider.name)
-                update_dashboard_state(
-                    current_task=None,
-                    current_provider=None,
-                    provider_status=build_provider_status(providers, state),
-                    history_entry={
-                        "task": task,
-                        "provider": provider.name,
-                        "status": "complete",
-                        "timestamp": datetime.datetime.now().isoformat(),
-                    },
-                )
-                task_done = True
-                provider_idx = (idx + 1) % len(providers)  # rotate for load balancing
-                log(f"Providers: {print_provider_status(providers, state)}", color="blue")
-            elif provider.is_available(state):
-                # Failed for a non-rate-limit reason and user didn't want a retry -> give up on task
-                log(f"Task NOT completed: {task}", color="bold_red")
-                log_json("task_failed", task=task, provider=provider.name)
-                update_dashboard_state(
-                    current_task=None,
-                    current_provider=None,
-                    provider_status=build_provider_status(providers, state),
-                    history_entry={
-                        "task": task,
-                        "provider": provider.name,
-                        "status": "failed",
-                        "timestamp": datetime.datetime.now().isoformat(),
-                    },
-                )
-                if not config.get("continue_on_failure", True):
-                    log("Stopping (continue_on_failure=false).", color="bold_red")
-                    notify("Orchestrator stopped", f"Task failed: {task}\ncontinue_on_failure=false")
-                    log_json("stop")
-                    return
-                # Defer it to the end, still unchecked, rather than leaving it at
-                # index 0 -- otherwise this exact task gets retried forever on
-                # every loop iteration and nothing else in the backlog ever runs.
-                defer_task(todo_path, task)
-                task_done = True  # move on to next task in Todo.md
-            else:
-                # Provider just got marked exhausted -> loop again to pick the next one immediately
-                log(f"Rotating away from exhausted provider '{provider.name}'...", color="yellow")
-                log_json("provider_exhausted", provider=provider.name)
-                provider_idx = (idx + 1) % len(providers)
-                update_dashboard_state(
-                    provider_status=build_provider_status(providers, state),
-                )
-                log(f"Providers: {print_provider_status(providers, state)}", color="blue")
-                continue
-
-        log(f"Waiting {delay} seconds before next task...", color="dim")
-        time.sleep(delay)
-
-        if args.once:
-            log("--once flag set. Exiting after one task.", color="dim")
-            break
+            if args.once:
+                log("--once flag set. Exiting after one task.", color="dim")
+                break
     finally:
         _remove_pid_file()
 

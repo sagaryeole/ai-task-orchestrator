@@ -348,6 +348,12 @@ class TestSuspiciousCompletion(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir:
             sp.run(["git", "init", "-q"], cwd=tmpdir)
+            # git status --porcelain (used to detect a real completion) sees
+            # untracked files too, so the test's own scaffolding must be
+            # committed as a clean baseline first, same as a real checkout
+            # where Todo.md/config.json are already tracked -- otherwise it's
+            # indistinguishable from the agent having "changed" something.
+            (Path(tmpdir) / ".gitignore").write_text("orchestrator.pid\n")
             todo = Path(tmpdir) / "Todo.md"
             todo.write_text("- [ ] Task one\n")
             cfg_path = Path(tmpdir) / "config.json"
@@ -360,6 +366,8 @@ class TestSuspiciousCompletion(unittest.TestCase):
             }))
             state_path = Path(tmpdir) / "state.json"
             state_path.write_text(json.dumps({"provider_cooldowns": {}}))
+            sp.run(["git", "add", "-A"], cwd=tmpdir)
+            sp.run(["git", "commit", "-q", "-m", "baseline"], cwd=tmpdir)
             pid_path = Path(tmpdir) / "orchestrator.pid"
 
             with patch.object(sys, 'argv', ['orchestrator.py', '--config', str(cfg_path), '--once']):
@@ -479,6 +487,11 @@ class TestRateLimitFalsePositive(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir:
             sp.run(["git", "init", "-q"], cwd=tmpdir)
+            # git status --porcelain (used to confirm the rate-limit signal)
+            # sees untracked files too, so commit the test's own scaffolding
+            # as a clean baseline first -- same reasoning as the sibling
+            # suspicious-completion test above.
+            (Path(tmpdir) / ".gitignore").write_text("orchestrator.pid\n")
 
             todo = Path(tmpdir) / "Todo.md"
             todo.write_text("- [ ] Task one\n")
@@ -507,6 +520,8 @@ class TestRateLimitFalsePositive(unittest.TestCase):
             }))
             state_path = Path(tmpdir) / "state.json"
             state_path.write_text(json.dumps({"provider_cooldowns": {}}))
+            sp.run(["git", "add", "-A"], cwd=tmpdir)
+            sp.run(["git", "commit", "-q", "-m", "baseline"], cwd=tmpdir)
             pid_path = Path(tmpdir) / "orchestrator.pid"
 
             with patch.object(sys, 'argv', ['orchestrator.py', '--config', str(cfg_path), '--once']):
