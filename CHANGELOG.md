@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **BREAKING: default config filename renamed** from `config.json` to `task-orchestrator.config.json` — `config.json` is a generic name likely to collide with another tool's config in the same repo, and its genericness made it easy to gitignore-miss. Existing users must rename their file (`mv config.json task-orchestrator.config.json`) or pass `--config config.json` explicitly; there is no automatic fallback.
 - `task-orchestrator init` now gitignores the config file it scaffolds by default — provider `env` blocks commonly hold API keys (directly or via `$VAR` interpolation), so the config should not be committed by default.
+- **`config.schema.json` renamed** to `task-orchestrator.config.schema.json` for the same collision-avoidance reason; it has no secrets and stays tracked in git. Update any `"$schema"` reference in your config file.
+- **`config.copilot.json` renamed** to `task-orchestrator.config.copilot.json` and is no longer committed to the repo (gitignored, same as the default config) — copy it from `examples/copilot.json` before using `run_copilot.ps1`.
 
 ## [2.0.0] - 2026-07-24
 

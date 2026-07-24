@@ -1,5 +1,10 @@
-task-orchestrator.config.json
-task-orchestrator.config.json.bak
+# Any task-orchestrator.config*.json variant (task-orchestrator.config.json,
+# task-orchestrator.config.copilot.json, etc.) commonly holds provider API
+# keys and must never be committed -- except the schema file, which is a
+# static JSON Schema doc with no secrets and is meant to ship with the repo.
+task-orchestrator.config*.json
+!task-orchestrator.config.schema.json
+task-orchestrator.config*.json.bak
 config.json
 config.json.bak
 state.json

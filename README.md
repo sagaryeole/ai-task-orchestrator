@@ -249,12 +249,12 @@ By default this uses whatever models your logged-in Copilot account has access t
 
 ### Copilot-First Run (Windows/PowerShell)
 
-This repo now includes a Copilot-only config and PowerShell helpers so you can run Todo tasks with GitHub Copilot CLI without editing the default config.
+This repo includes PowerShell helpers so you can run Todo tasks with GitHub Copilot CLI without editing the default config. First, create `task-orchestrator.config.copilot.json` by copying the starter template — `cp examples/copilot.json task-orchestrator.config.copilot.json` (it's gitignored by default like any other config file, since providers commonly hold API keys).
 
 Files:
 
-- `config.copilot.json` — Copilot-only provider, unattended mode, verification via `python -m unittest discover -s tests`
-- `run_copilot.ps1` — runs `orchestrator.py` with `--config config.copilot.json`
+- `task-orchestrator.config.copilot.json` — Copilot-only provider, unattended mode, verification via `python -m unittest discover -s tests` (not shipped — copy it from `examples/copilot.json`)
+- `run_copilot.ps1` — runs `orchestrator.py` with `--config task-orchestrator.config.copilot.json`
 - `run_forever.ps1` — PowerShell supervisor equivalent to `run_forever.sh`
 
 Examples:
@@ -270,7 +270,7 @@ Examples:
 ./run_copilot.ps1 --json-logs
 
 # Crash-restart supervisor mode
-./run_forever.ps1 --config config.copilot.json
+./run_forever.ps1 --config task-orchestrator.config.copilot.json
 ```
 
 Prerequisites:
