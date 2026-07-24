@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="260" viewBox="0 0 1200 260" role="img" aria-labelledby="title desc">
+  <title id="title">Task Orchestrator Logo</title>
+  <desc id="desc">Task Orchestrator brand banner</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#111827"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" x2="1" y1="0" y2="0">
+      <stop offset="0%" stop-color="#22c55e"/>
+      <stop offset="100%" stop-color="#14b8a6"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="260" rx="24" fill="url(#bg)"/>
+
+  <g transform="translate(70,45)">
+    <rect x="0" y="0" width="170" height="170" rx="20" fill="#0b1220" stroke="#1f2937"/>
+    <circle cx="85" cy="85" r="52" fill="none" stroke="url(#accent)" stroke-width="10"/>
+    <circle cx="85" cy="33" r="7" fill="#34d399"/>
+    <circle cx="131" cy="111" r="7" fill="#2dd4bf"/>
+    <circle cx="39" cy="111" r="7" fill="#4ade80"/>
+    <path d="M85 85 L85 33 M85 85 L131 111 M85 85 L39 111" stroke="#9ca3af" stroke-width="4" stroke-linecap="round"/>
+  </g>
+
+  <g transform="translate(285,74)">
+    <text x="0" y="50" font-family="Consolas, 'Cascadia Code', Menlo, monospace" font-size="58" font-weight="700" fill="#e5e7eb">Task Orchestrator</text>
+    <text x="0" y="100" font-family="Segoe UI, Arial, sans-serif" font-size="28" fill="#9ca3af">AI backlog automation with provider failover</text>
+    <rect x="0" y="126" width="660" height="10" rx="5" fill="#1f2937"/>
+    <rect x="0" y="126" width="460" height="10" rx="5" fill="url(#accent)"/>
+  </g>
+</svg>

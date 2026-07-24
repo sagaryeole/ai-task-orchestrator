@@ -1,0 +1,23 @@
+{
+  "_comment": "Claude Code CLI provider — requires claude CLI installed and authenticated",
+  "todo_file": "Todo.md",
+  "working_directory": ".",
+  "prompt_template": "prompts/task_prompt.txt",
+  "delay_seconds": 60,
+  "subprocess_timeout": null,
+  "stall_timeout_seconds": 600,
+  "max_retries_per_provider": 2,
+  "require_manual_confirmation": false,
+  "auto_commit": true,
+  "verify_commands": [],
+  "providers": [
+    {
+      "name": "claude",
+      "enabled": true,
+      "command": "claude --no-interactive --print",
+      "env": {"ANTHROPIC_API_KEY": "$ANTHROPIC_API_KEY"},
+      "rate_limit_patterns": ["rate limit", "429", "overloaded", "capacity"],
+      "cooldown_seconds": 600
+    }
+  ]
+}
