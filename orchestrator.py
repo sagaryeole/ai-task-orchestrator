@@ -30,6 +30,8 @@ import shlex
 import signal
 import argparse
 import datetime
+import fcntl
+from contextlib import contextmanager
 from pathlib import Path
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
@@ -294,6 +296,21 @@ def notify(title, message):
 # Todo handling
 # --------------------------------------------------------------------------
 
+@contextmanager
+def _todo_lock(todo_path: Path):
+    """Advisory cross-process lock around Todo.md writes so two orchestrator
+    instances pointed at the same file cannot interleave read-modify-write
+    sequences and corrupt it."""
+    lock_path = Path(str(todo_path) + ".lock")
+    fd = os.open(str(lock_path), os.O_CREAT | os.O_WRONLY)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+
 def _get_section_for_line(text: str, target_line: str) -> str:
     """Return the header text for the section containing the given task line,
     or '' if it is not under any header. Headers are lines matching ^#{1,6} .
@@ -321,9 +338,10 @@ def load_tasks(todo_path: Path, skip_sections=None):
 
 
 def mark_complete(todo_path: Path, task: str):
-    text = todo_path.read_text()
-    text = text.replace(f"- [ ] {task}", f"- [x] {task}", 1)
-    todo_path.write_text(text)
+    with _todo_lock(todo_path):
+        text = todo_path.read_text()
+        text = text.replace(f"- [ ] {task}", f"- [x] {task}", 1)
+        todo_path.write_text(text)
 
 
 def defer_task(todo_path: Path, task: str):
@@ -332,13 +350,14 @@ def defer_task(todo_path: Path, task: str):
     at index 0 forever -- load_tasks() always re-reads from the top, so it
     would be retried on every single loop iteration, permanently blocking
     every other task behind it."""
-    text = todo_path.read_text()
-    text = text.replace(f"- [ ] {task}", "", 1)
-    if text.endswith("\n"):
-        text = text.rstrip("\n") + f"\n- [ ] {task}\n"
-    else:
-        text = text + f"\n- [ ] {task}\n"
-    todo_path.write_text(text)
+    with _todo_lock(todo_path):
+        text = todo_path.read_text()
+        text = text.replace(f"- [ ] {task}", "", 1)
+        if text.endswith("\n"):
+            text = text.rstrip("\n") + f"\n- [ ] {task}\n"
+        else:
+            text = text + f"\n- [ ] {task}\n"
+        todo_path.write_text(text)
 
 
 def _count_matching_lines(text, line_pattern, skip_sections):
