@@ -29,6 +29,9 @@ from orchestrator import (
     TAG_REGEX,
     STATE_PATH,
     print_summary,
+    run_provider_stats,
+    count_total_tasks,
+    count_completed_tasks,
 )
 
 
@@ -218,6 +221,81 @@ class TestGitCommitGuard(unittest.TestCase):
         self.assertIsNone(result)
 
 
+class TestSuspiciousCompletion(unittest.TestCase):
+    """A real incident: kilo reported exit code 0 on a task and had made zero
+    edits, and the orchestrator marked it complete anyway since nothing
+    checked whether the working tree actually changed. These tests cover
+    the fix, in both confirmation modes."""
+
+    def test_unattended_does_not_autocomplete_when_nothing_changed(self):
+        from unittest.mock import patch
+        from orchestrator import main
+        import subprocess as sp
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sp.run(["git", "init", "-q"], cwd=tmpdir)
+            todo = Path(tmpdir) / "Todo.md"
+            todo.write_text("- [ ] Task one\n")
+            cfg_path = Path(tmpdir) / "config.json"
+            cfg_path.write_text(json.dumps({
+                "todo_file": str(todo),
+                "working_directory": tmpdir,
+                "require_manual_confirmation": False,
+                "continue_on_failure": True,
+                "providers": [{"name": "p", "command": "echo hello", "env": {}, "rate_limit_patterns": []}],
+            }))
+            state_path = Path(tmpdir) / "state.json"
+            state_path.write_text(json.dumps({"provider_cooldowns": {}}))
+
+            with patch.object(sys, 'argv', ['orchestrator.py', '--config', str(cfg_path), '--once']):
+                with patch('orchestrator.STATE_PATH', state_path):
+                    with patch('orchestrator.time.sleep'):
+                        with patch('orchestrator.log') as mock_log:
+                            main()
+
+            log_output = ' '.join(str(call.args[0]) for call in mock_log.call_args_list)
+            self.assertIn("SUSPICIOUS", log_output)
+            final_text = todo.read_text()
+            self.assertNotIn("- [x] Task one", final_text)
+            self.assertIn("- [ ] Task one", final_text)
+
+    def test_unattended_completes_normally_when_something_changed(self):
+        from unittest.mock import patch
+        from orchestrator import main
+        import subprocess as sp
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sp.run(["git", "init", "-q"], cwd=tmpdir)
+            (Path(tmpdir) / "existing.txt").write_text("baseline\n")
+            sp.run(["git", "add", "-A"], cwd=tmpdir)
+            sp.run(["git", "commit", "-q", "-m", "baseline"], cwd=tmpdir)
+
+            todo = Path(tmpdir) / "Todo.md"
+            todo.write_text("- [ ] Task one\n")
+            cfg_path = Path(tmpdir) / "config.json"
+            # Command actually modifies a tracked file, so git diff --stat is non-empty.
+            write_cmd = f"python3 -c \"open('{tmpdir}/existing.txt', 'w').write('changed')\""
+            cfg_path.write_text(json.dumps({
+                "todo_file": str(todo),
+                "working_directory": tmpdir,
+                "require_manual_confirmation": False,
+                "providers": [{"name": "p", "command": write_cmd, "env": {}, "rate_limit_patterns": []}],
+            }))
+            state_path = Path(tmpdir) / "state.json"
+            state_path.write_text(json.dumps({"provider_cooldowns": {}}))
+
+            with patch.object(sys, 'argv', ['orchestrator.py', '--config', str(cfg_path), '--once']):
+                with patch('orchestrator.STATE_PATH', state_path):
+                    with patch('orchestrator.time.sleep'):
+                        with patch('orchestrator.log') as mock_log:
+                            main()
+
+            log_output = ' '.join(str(call.args[0]) for call in mock_log.call_args_list)
+            self.assertNotIn("SUSPICIOUS", log_output)
+            final_text = todo.read_text()
+            self.assertIn("- [x] Task one", final_text)
+
+
 class TestVerifyLiveOutput(unittest.TestCase):
     def test_verify_prints_to_stderr(self):
         import io
@@ -366,6 +444,44 @@ class TestLintTodo(unittest.TestCase):
         self.assertEqual(mock_log.call_count, 0)
 
 
+class TestCountTasksSkipSections(unittest.TestCase):
+    def _write(self, content):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
+            f.write(content)
+            return Path(f.name)
+
+    def test_duplicate_text_within_skipped_section_all_excluded(self):
+        # Regression test: a set-based skip/subtract implementation dedupes
+        # by line text, so two identical lines in the same skipped section
+        # only get subtracted once, undercounting by 1 for every extra
+        # duplicate. Both occurrences must be excluded here.
+        path = self._write(
+            "## Section A (kept)\n"
+            "- [ ] Unique kept task\n"
+            "## Section B (skip this one)\n"
+            "- [ ] Duplicate task text\n"
+            "- [ ] Duplicate task text\n"
+        )
+        try:
+            total = count_total_tasks(path, skip_sections=["Section B (skip this one)"])
+            self.assertEqual(total, 1)
+        finally:
+            os.unlink(path)
+
+    def test_duplicate_text_across_kept_and_skipped_sections(self):
+        path = self._write(
+            "## Section A (kept)\n"
+            "- [x] Same text\n"
+            "## Section B (skip this one)\n"
+            "- [x] Same text\n"
+        )
+        try:
+            completed = count_completed_tasks(path, skip_sections=["Section B (skip this one)"])
+            self.assertEqual(completed, 1)
+        finally:
+            os.unlink(path)
+
+
 class TestGetTaskTimeout(unittest.TestCase):
     def test_no_overrides_returns_global(self):
         self.assertEqual(get_task_timeout("do stuff", 180, {}), 180)
@@ -491,6 +607,94 @@ class TestSummaryFlag(unittest.TestCase):
             output = fake_stdout.getvalue()
             self.assertIn("Summary", output)
             self.assertIn("Tasks completed today: 1", output)
+
+
+class TestProviderStats(unittest.TestCase):
+    def test_stats_logs_output(self):
+        from unittest.mock import patch
+        cfg = {
+            "name": "p",
+            "command": "echo hello",
+            "env": {},
+            "rate_limit_patterns": [],
+            "stats_command": "echo '{\"tokens\": 100}'",
+        }
+        with patch('orchestrator.log_json') as mock_json:
+            p = Provider(cfg)
+            run_provider_stats(p, "/tmp", "Test task")
+        logged = [str(c.args[0]) for c in mock_json.call_args_list]
+        self.assertTrue(any("provider_stats" in c for c in logged))
+
+    def test_stats_no_command(self):
+        from unittest.mock import patch
+        cfg = {
+            "name": "p",
+            "command": "echo hello",
+            "env": {},
+            "rate_limit_patterns": [],
+        }
+        with patch('orchestrator.log') as mock_log:
+            p = Provider(cfg)
+            run_provider_stats(p, "/tmp", "Test task")
+        self.assertEqual(mock_log.call_count, 0)
+
+    def test_stats_command_not_found(self):
+        from unittest.mock import patch
+        cfg = {
+            "name": "p",
+            "command": "echo hello",
+            "env": {},
+            "rate_limit_patterns": [],
+            "stats_command": "/nonexistent/stats-binary",
+        }
+        with patch('orchestrator.log') as mock_log:
+            with patch('orchestrator.log_json') as mock_json:
+                p = Provider(cfg)
+                run_provider_stats(p, "/tmp", "Test task")
+        log_msgs = [str(c.args[0]) for c in mock_log.call_args_list]
+        self.assertTrue(any("not found" in m for m in log_msgs))
+
+    def test_stats_timeout(self):
+        # Simulate the timeout directly rather than actually running a
+        # subprocess and waiting for run_provider_stats()'s real 30s timeout
+        # to elapse -- the previous version used "stats_command": "sleep 100"
+        # and genuinely blocked for 30 real seconds. Since verify_commands
+        # runs the whole test suite after every task, that added a 30s tax
+        # to every single task completion.
+        import subprocess
+        from unittest.mock import patch
+        cfg = {
+            "name": "p",
+            "command": "echo hello",
+            "env": {},
+            "rate_limit_patterns": [],
+            "stats_command": "stats-binary",
+        }
+        with patch('orchestrator.log') as mock_log:
+            with patch('orchestrator.log_json') as mock_json:
+                with patch('orchestrator.subprocess.run', side_effect=subprocess.TimeoutExpired(cmd="stats-binary", timeout=30)):
+                    p = Provider(cfg)
+                    run_provider_stats(p, "/tmp", "Test task")
+        log_msgs = [str(c.args[0]) for c in mock_log.call_args_list]
+        self.assertTrue(any("timed out" in m for m in log_msgs))
+
+    def test_stats_logs_json_payload(self):
+        from unittest.mock import patch
+        cfg = {
+            "name": "p",
+            "command": "echo hello",
+            "env": {},
+            "rate_limit_patterns": [],
+            "stats_command": "printf '{\"tokens\": 50, \"cost\": 0.01}'",
+        }
+        with patch('orchestrator.log_json') as mock_json:
+            p = Provider(cfg)
+            run_provider_stats(p, "/tmp", "Test task")
+        args_list = [c.args for c in mock_json.call_args_list]
+        event_names = [a[0] for a in args_list if a]
+        self.assertIn("provider_stats", event_names)
+        kwargs_list = [c.kwargs for c in mock_json.call_args_list]
+        self.assertTrue(any(k.get("task") == "Test task" for k in kwargs_list))
 
 
 if __name__ == "__main__":

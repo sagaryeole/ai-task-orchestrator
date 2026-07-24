@@ -68,8 +68,7 @@ def validate_config(config):
     errors = []
 
     if not isinstance(config, dict):
-        errors.append("config.json must be a JSON object (dict).")
-        _fail(errors)
+        sys.exit("Config validation failed:\n  - config.json must be a JSON object (dict).")
 
     required_top = ["todo_file", "providers"]
     for key in required_top:
@@ -320,41 +319,37 @@ def defer_task(todo_path: Path, task: str):
     todo_path.write_text(text)
 
 
-def count_total_tasks(todo_path: Path, skip_sections=None):
-    text = todo_path.read_text()
-    all_tasks = re.findall(r"- \[( |x)\] .+", text)
-    skip_sections = [s.lower() for s in (skip_sections or [])]
+def _count_matching_lines(text, line_pattern, skip_sections):
+    """Count lines matching line_pattern, excluding any under a section whose
+    header is in skip_sections. Counts occurrences directly rather than
+    de-duplicating by line text -- a set-based diff here would undercount
+    whenever two different sections happen to contain byte-identical task
+    text (a real thing we found in an actual Todo.md), since a set can't
+    tell two identical lines in different sections apart."""
     if not skip_sections:
-        return len(all_tasks)
-    task_lines = re.findall(r"^(- \[.\] .+)$", text, re.MULTILINE)
-    skipped = set()
+        return len(re.findall(line_pattern, text, re.MULTILINE))
+    count = 0
     current_header = ""
     for line in text.splitlines():
         stripped = line.strip()
         if re.match(r"^#{1,6}\s+.+", stripped):
             current_header = stripped.lstrip("#").strip()
-        elif re.match(r"^- \[.\] .+", stripped):
-            if current_header.lower() in skip_sections:
-                skipped.add(stripped)
-    return len(all_tasks) - len(skipped)
+        elif re.match(line_pattern, stripped):
+            if current_header.lower() not in skip_sections:
+                count += 1
+    return count
+
+
+def count_total_tasks(todo_path: Path, skip_sections=None):
+    text = todo_path.read_text()
+    skip_sections = [s.lower() for s in (skip_sections or [])]
+    return _count_matching_lines(text, r"^- \[.\] .+$", skip_sections)
 
 
 def count_completed_tasks(todo_path: Path, skip_sections=None):
     text = todo_path.read_text()
-    all_done = re.findall(r"- \[x\] .+", text)
     skip_sections = [s.lower() for s in (skip_sections or [])]
-    if not skip_sections:
-        return len(all_done)
-    skipped = set()
-    current_header = ""
-    for line in text.splitlines():
-        stripped = line.strip()
-        if re.match(r"^#{1,6}\s+.+", stripped):
-            current_header = stripped.lstrip("#").strip()
-        elif re.match(r"^- \[x\] .+", stripped):
-            if current_header.lower() in skip_sections:
-                skipped.add(stripped)
-    return len(all_done) - len(skipped)
+    return _count_matching_lines(text, r"^- \[x\] .+$", skip_sections)
 
 
 def format_duration(seconds):
@@ -555,7 +550,8 @@ class Provider:
       "command": "kilo --auto --model deepseek/deepseek-chat-v3-0324:free",
       "env": {"OPENROUTER_API_KEY": "sk-..."},
       "rate_limit_patterns": ["rate limit", "429", "quota exceeded"],
-      "cooldown_seconds": 3600
+      "cooldown_seconds": 3600,
+      "stats_command": "kilo stats"
     }
     """
 
@@ -566,15 +562,9 @@ class Provider:
         self.rate_limit_patterns = [p.lower() for p in cfg.get("rate_limit_patterns", [])]
         self.cooldown_seconds = cfg.get("cooldown_seconds", 600)
         self.subprocess_timeout = subprocess_timeout
-        # Unlike subprocess_timeout (a hard wall-clock cap), stall_timeout is
-        # activity-based: it only fires if there's been no CPU usage AND no
-        # file changes for this long, so a genuinely big/slow task that's
-        # still working is never killed, but a task that's alive yet
-        # producing nothing (hung, or silently waiting on input that will
-        # never come) gets caught and retried/deferred instead of blocking
-        # the whole overnight run forever.
         self.stall_timeout = stall_timeout
         self.priority = int(cfg.get("priority", 0))
+        self.stats_command = cfg.get("stats_command")
 
     def is_available(self, state):
         until = state["provider_cooldowns"].get(self.name, 0)
@@ -813,6 +803,55 @@ def git_commit(config, task: str):
     subprocess.run(["git", "commit", "-m", f"Task: {task}"], cwd=wd)
 
 
+def run_provider_stats(provider, working_directory: str, task: str):
+    """Collect usage/cost stats from the provider CLI if it supports it."""
+    stats_cmd = getattr(provider, "stats_command", None)
+    if not stats_cmd:
+        return
+    log(f"[{provider.name}] collecting usage stats...", color="cyan")
+    try:
+        result = subprocess.run(
+            shlex.split(stats_cmd),
+            cwd=working_directory,
+            env={**os.environ, **provider.env},
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except FileNotFoundError:
+        log(f"[{provider.name}] stats command not found: {stats_cmd}", color="yellow")
+        log_json("provider_stats_error", provider=provider.name, error="command_not_found", task=task)
+        return
+    except subprocess.TimeoutExpired:
+        log(f"[{provider.name}] stats command timed out after 30s", color="yellow")
+        log_json("provider_stats_error", provider=provider.name, error="timeout", task=task)
+        return
+    except Exception as e:
+        log(f"[{provider.name}] stats command failed: {e}", color="yellow")
+        log_json("provider_stats_error", provider=provider.name, error=str(e), task=task)
+        return
+
+    stdout = result.stdout.strip()
+    stderr = result.stderr.strip()
+
+    log(f"[{provider.name}] stats output (exit {result.returncode}):", color="dim")
+    if stdout:
+        log(stdout)
+    if stderr:
+        log(stderr, color="yellow")
+
+    stats_payload = {"provider": provider.name, "task": task, "exit_code": result.returncode}
+    if stdout:
+        try:
+            stats_payload["data"] = json.loads(stdout)
+        except json.JSONDecodeError:
+            stats_payload["raw_output"] = stdout
+    if stderr:
+        stats_payload["stderr"] = stderr
+
+    log_json("provider_stats", **stats_payload)
+
+
 # --------------------------------------------------------------------------
 # Main loop
 # --------------------------------------------------------------------------
@@ -975,18 +1014,33 @@ def main():
 
                 verified = run_verification(config)
 
+                # exit_code == 0 alone isn't proof a task actually did anything --
+                # a real incident: kilo reported success on a task and had made
+                # zero edits. Check whether the working tree actually changed and
+                # treat a "success" with no changes as suspicious rather than
+                # trusting it at face value, in both confirmation modes.
+                diff_stat = subprocess.run(
+                    ["git", "diff", "--stat"],
+                    cwd=working_directory, capture_output=True, text=True, timeout=2,
+                )
+                stat_output = diff_stat.stdout.strip() if diff_stat.returncode == 0 else ""
+                suspicious = exit_code == 0 and diff_stat.returncode == 0 and not stat_output
+                if suspicious:
+                    log(f"[{provider.name}] SUSPICIOUS: exit code 0 but no files changed -- "
+                        "this looks like a false success, not a real completion.", color="bold_red")
+                    log_json("suspicious_completion", provider=provider.name, task=task)
+
                 if require_confirmation:
                     notify("Task needs confirmation", f"Task: {task}\nProvider: {provider.name}")
-                    diff_stat = subprocess.run(
-                        ["git", "diff", "--stat"],
-                        cwd=working_directory, capture_output=True, text=True, timeout=2,
+                    if stat_output:
+                        log("Working tree changes (git diff --stat):\n" + stat_output, color="yellow")
+                    prompt_label = (
+                        "mark complete despite NO changes detected?" if suspicious else "mark complete?"
                     )
-                    if diff_stat.returncode == 0:
-                        stat_output = diff_stat.stdout.strip()
-                        if stat_output:
-                            log("Working tree changes (git diff --stat):\n" + stat_output, color="yellow")
                     answer = input(
-                        style(f"\nTask '{task}' via '{provider.name}' — mark complete? (y/n/retry/skip-provider/skip-task): ", "bold_cyan")
+                        style(f"\nTask '{task}' via '{provider.name}' — {prompt_label} "
+                              "(y/n/retry/skip-provider/skip-task): ",
+                              "bold_red" if suspicious else "bold_cyan")
                     ).strip().lower()
                     if answer == "y":
                         attempt_success = True
@@ -1006,9 +1060,13 @@ def main():
                         log("Task left pending by user choice.", color="yellow")
                         break
                 else:
-                    if exit_code == 0 and verified:
+                    if exit_code == 0 and verified and not suspicious:
                         attempt_success = True
                         break
+                    elif suspicious:
+                        log(f"[{provider.name}] Not auto-completing a suspicious result -- "
+                            "treating as a failed attempt.", color="bold_red")
+                        # falls through to the same retry/defer path as any other failure
                     # non-rate-limit failure: retry same provider up to max_retries_per_provider
 
             if attempt_success:
@@ -1019,6 +1077,7 @@ def main():
                 state["completed_task_durations"] = durations[-200:]
                 save_state(state)
                 git_commit(config, task)
+                run_provider_stats(provider, working_directory, task)
                 log(f"Task marked complete: {task} (provider: {provider.name})", color="bold_green")
                 print_progress(todo_path, state, skip_sections=args.skip_section)
                 log_json("task_complete", task=task, provider=provider.name)

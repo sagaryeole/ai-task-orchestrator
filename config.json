@@ -22,7 +22,8 @@
       "command": "kilo run --auto",
       "env": {},
       "rate_limit_patterns": ["rate limit", "429", "quota exceeded", "too many requests"],
-      "cooldown_seconds": 300
+      "cooldown_seconds": 300,
+      "stats_command": "kilo stats --json"
     }
   ]
 }
