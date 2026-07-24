@@ -206,8 +206,11 @@ def load_config(config_path=None):
 
 def load_state():
     if STATE_PATH.exists():
-        return json.loads(STATE_PATH.read_text())
-    return {"provider_cooldowns": {}}  # provider_name -> unix timestamp when available again
+        state = json.loads(STATE_PATH.read_text())
+    else:
+        state = {"provider_cooldowns": {}}
+    state.setdefault("completed_task_durations", [])
+    return state
 
 
 def save_state(state):
@@ -275,6 +278,57 @@ def defer_task(todo_path: Path, task: str):
     else:
         text = text + f"\n- [ ] {task}\n"
     todo_path.write_text(text)
+
+
+def count_total_tasks(todo_path: Path):
+    text = todo_path.read_text()
+    return len(re.findall(r"- \[( |x)\] .+", text))
+
+
+def count_completed_tasks(todo_path: Path):
+    text = todo_path.read_text()
+    return len(re.findall(r"- \[x\] .+", text))
+
+
+def format_duration(seconds):
+    if seconds is None:
+        return "unknown"
+    seconds = int(round(seconds))
+    if seconds < 0:
+        return "0s"
+    if seconds < 60:
+        return f"{seconds}s"
+    elif seconds < 3600:
+        m, s = divmod(seconds, 60)
+        return f"{m}m {s}s"
+    else:
+        h, rem = divmod(seconds, 3600)
+        m, _ = divmod(rem, 60)
+        if m == 0:
+            return f"{h}h"
+        return f"{h}h {m}m"
+
+
+def print_progress(todo_path: Path, state):
+    completed = count_completed_tasks(todo_path)
+    total = count_total_tasks(todo_path)
+    if total == 0:
+        return
+
+    pct = (completed / total) * 100
+    remaining = total - completed
+
+    durations = state.get("completed_task_durations", [])
+    durations = durations[-50:]
+    if durations and remaining > 0:
+        avg = sum(durations) / len(durations)
+        eta_seconds = remaining * avg
+        eta_str = format_duration(eta_seconds)
+    else:
+        eta_str = "unknown"
+
+    line = f"Progress + ETA: Task {completed}/{total} ({pct:.0f}%), ~{eta_str} remaining"
+    log(line, color="blue")
 
 
 def build_prompt(task: str, template_path: Path):
@@ -728,12 +782,15 @@ def main():
     while True:
         tasks = load_tasks(todo_path)
         if not tasks:
+            print_progress(todo_path, state)
             log("All tasks completed. Exiting.", color="bold_green")
             break
 
         task = tasks[0]
+        task_start_time = time.time()
         log("=" * 60, color="dim")
         log(f"Starting task: {task}", color="bold_green")
+        print_progress(todo_path, state)
         log_json("task_start", task=task, provider_idx=provider_idx)
 
         prompt = build_prompt(task, prompt_template)
@@ -815,8 +872,14 @@ def main():
 
             if attempt_success:
                 mark_complete(todo_path, task)
+                duration = time.time() - task_start_time
+                durations = state.get("completed_task_durations", [])
+                durations.append(duration)
+                state["completed_task_durations"] = durations[-200:]
+                save_state(state)
                 git_commit(config, task)
                 log(f"Task marked complete: {task} (provider: {provider.name})", color="bold_green")
+                print_progress(todo_path, state)
                 log_json("task_complete", task=task, provider=provider.name)
                 task_done = True
                 provider_idx = (idx + 1) % len(providers)  # rotate for load balancing
