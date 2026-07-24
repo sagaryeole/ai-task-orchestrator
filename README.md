@@ -158,5 +158,43 @@ Example:
 ## Known Limitations / Follow-ups
 
 - Rate-limit detection is text-pattern matching against CLI output, not a structured API response — patterns need to be tuned per tool/provider and may need updates if a CLI changes its error wording.
-- There's no live dashboard; progress is visible via the terminal and `logs/orchestrator.log`, plus a one-line provider cooldown status printed on startup and after each provider rotation.
 - Providers are tried round-robin by default, but you can set a `priority` field to prefer specific providers (higher = preferred).
+
+## Dashboard
+
+A minimal local dashboard is served via Python's stdlib `http.server` — no external dependencies required. It exposes the current run state (active task, provider status, recent history) as both JSON and an HTML page.
+
+### Enabling
+
+Set `dashboard_port` in `config.json` to the port you want the dashboard to listen on:
+
+```json
+{
+  "dashboard_port": 8080
+}
+```
+
+When `dashboard_port` is `null` (the default), the dashboard is disabled.
+
+### Endpoints
+
+| Path | Content-Type | Description |
+|---|---|---|
+| `/` | `text/html` | Human-readable dashboard with auto-refresh (5s) |
+| `/api/state` | `application/json` | Machine-readable current run state |
+
+### JSON response shape (`/api/state`)
+
+```json
+{
+  "current_task": "Task one",
+  "current_provider": "kilo",
+  "providers": [
+    {"name": "kilo", "available": true, "cooldown_until": null}
+  ],
+  "history": [
+    {"task": "Task one", "provider": "kilo", "status": "complete", "timestamp": "2026-07-24T11:45:58"}
+  ],
+  "uptime_seconds": 123.4
+}
+```

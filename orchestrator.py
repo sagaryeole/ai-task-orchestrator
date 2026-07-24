@@ -31,6 +31,7 @@ import signal
 import argparse
 import datetime
 from pathlib import Path
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 CONFIG_PATH = Path("config.json")
 STATE_PATH = Path("state.json")
@@ -767,8 +768,205 @@ def print_provider_status(providers, state):
 
 
 # --------------------------------------------------------------------------
-# Verification / git
+# Dashboard (stdlib http.server)
 # --------------------------------------------------------------------------
+
+_dashboard_state = {
+    "current_task": None,
+    "current_provider": None,
+    "providers": {},
+    "history": [],
+    "start_time": None,
+}
+
+_DASHBOARD_HISTORY_MAX = 50
+
+
+class DashboardHandler(BaseHTTPRequestHandler):
+    """Serves JSON and HTML for the local dashboard."""
+
+    def do_GET(self):
+        if self.path == "/api/state":
+            self._serve_json()
+        else:
+            self._serve_html()
+
+    def _serve_json(self):
+        state = _dashboard_state
+        now = time.time()
+        provider_list = []
+        for name, info in state.get("providers", {}).items():
+            provider_list.append({
+                "name": name,
+                "available": info.get("available", False),
+                "cooldown_until": info.get("cooldown_until"),
+            })
+        payload = {
+            "current_task": state.get("current_task"),
+            "current_provider": state.get("current_provider"),
+            "providers": provider_list,
+            "history": state.get("history", []),
+            "uptime_seconds": round(now - state.get("start_time", now), 1) if state.get("start_time") else 0,
+        }
+        body = json.dumps(payload, indent=2).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _serve_html(self):
+        state = _dashboard_state
+        body = _build_html(state).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, format, *args):
+        pass  # suppress request logging — dashboard traffic is noise in the orchestrator log
+
+
+class DashboardServer(HTTPServer):
+    """Minimal HTTP server for the local dashboard."""
+    allow_reuse_address = True
+
+
+def start_dashboard(port):
+    """Start the dashboard server on 127.0.0.1:{port} in a background thread.
+    Returns the server instance, or None if the port is not a positive integer."""
+    if not isinstance(port, int) or port <= 0:
+        return None
+    try:
+        server = DashboardServer(("127.0.0.1", port), DashboardHandler)
+    except OSError as e:
+        log(f"Dashboard server could not start on port {port}: {e}", color="bold_red")
+        return None
+    server.daemon_threads = True
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    log(f"Dashboard available at http://127.0.0.1:{port}", color="green")
+    return server
+
+
+def update_dashboard_state(current_task=None, current_provider=None, provider_status=None, history_entry=None):
+    """Update the shared dashboard state. Called from the orchestrator main loop."""
+    state = _dashboard_state
+    if current_task is not None:
+        state["current_task"] = current_task
+    if current_provider is not None:
+        state["current_provider"] = current_provider
+    if provider_status is not None:
+        state["providers"] = provider_status
+    if history_entry is not None:
+        state.setdefault("history", [])
+        state["history"].append(history_entry)
+        if len(state["history"]) > _DASHBOARD_HISTORY_MAX:
+            state["history"] = state["history"][-_DASHBOARD_HISTORY_MAX:]
+    if state.get("start_time") is None:
+        state["start_time"] = time.time()
+
+
+def build_provider_status(providers, state):
+    """Build a provider-status dict for the dashboard."""
+    now = time.time()
+    status = {}
+    for p in providers:
+        until = state["provider_cooldowns"].get(p.name, 0)
+        status[p.name] = {
+            "available": until <= now,
+            "cooldown_until": until if until > now else None,
+        }
+    return status
+
+
+def html_escape(text):
+    """Minimal HTML escaping for dashboard output."""
+    return (
+        text.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
+
+def _build_html(state):
+    now = time.time()
+    uptime = round(now - state.get("start_time", now), 1) if state.get("start_time") else 0
+    current_task = state.get("current_task") or "idle"
+    current_provider = state.get("current_provider") or "none"
+
+    provider_rows = ""
+    for name, info in state.get("providers", {}).items():
+        available = info.get("available", False)
+        cooldown_until = info.get("cooldown_until")
+        if available:
+            status_class = "available"
+            status_text = "available"
+        elif cooldown_until:
+            remaining = max(0, int(cooldown_until - now))
+            status_class = "cooldown"
+            status_text = "cooldown ({0}s)".format(remaining)
+        else:
+            status_class = "cooldown"
+            status_text = "unknown"
+        provider_rows += (
+            '<tr><td>{0}</td>'
+            '<td class="{1}">{2}</td></tr>\n'
+        ).format(html_escape(name), status_class, status_text)
+
+    history_rows = ""
+    for entry in state.get("history", []):
+        status_class = "complete" if entry.get("status") == "complete" else "failed"
+        history_rows += (
+            '<tr><td>{0}</td>'
+            '<td>{1}</td>'
+            '<td class="{2}">{3}</td>'
+            '<td>{4}</td></tr>\n'
+        ).format(
+            html_escape(entry.get("task", "")),
+            html_escape(entry.get("provider", "")),
+            status_class,
+            entry.get("status", ""),
+            html_escape(entry.get("timestamp", "")),
+        )
+
+    if not history_rows:
+        history_rows = '<tr><td colspan="4">No history yet</td></tr>\n'
+
+    parts = [
+        '<!DOCTYPE html><html><head><meta charset="utf-8">',
+        '<meta http-equiv="refresh" content="5">',
+        '<title>Orchestrator Dashboard</title>',
+        '<style>',
+        'body{font-family:sans-serif;margin:2em;background:#f5f5f5;color:#333}',
+        'h1{color:#333}',
+        '.card{background:#fff;padding:1em;margin:1em 0;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.1)}',
+        'table{border-collapse:collapse;width:100%}',
+        'th,td{padding:0.5em;text-align:left;border-bottom:1px solid #eee}',
+        '.available{color:green;font-weight:bold}',
+        '.cooldown{color:orange;font-weight:bold}',
+        '.complete{color:green}',
+        '.failed{color:red}',
+        '.uptime{color:#666;font-size:0.9em}',
+        '</style></head><body>',
+        '<h1>Orchestrator Dashboard</h1>',
+        '<p class="uptime">Uptime: {0}s</p>'.format(uptime),
+        '<div class="card"><h2>Current Task</h2>',
+        '<p><strong>Task:</strong> {0}</p>'.format(html_escape(current_task)),
+        '<p><strong>Provider:</strong> {0}</p></div>'.format(html_escape(current_provider)),
+        '<div class="card"><h2>Providers</h2>',
+        '<table><tr><th>Provider</th><th>Status</th></tr>',
+        provider_rows,
+        '</table></div>',
+        '<div class="card"><h2>Recent History</h2>',
+        '<table><tr><th>Task</th><th>Provider</th><th>Status</th><th>Time</th></tr>',
+        history_rows,
+        '</table></div>',
+        '</body></html>',
+    ]
+    return "".join(parts)
 
 def run_verification(config):
     checks = config.get("verify_commands", [])
@@ -916,6 +1114,10 @@ def main():
     providers = load_providers(config, subprocess_timeout=subprocess_timeout, stall_timeout=stall_timeout)
     log(f"Providers: {print_provider_status(providers, state)}", color="blue")
 
+    dashboard_port = config.get("dashboard_port")
+    dashboard_server = start_dashboard(dashboard_port)
+    _dashboard_state["start_time"] = time.time()
+
     todo_path = Path(config["todo_file"])
     prompt_template = Path(config.get("prompt_template", "prompts/task_prompt.txt"))
     delay = config.get("delay_seconds", 60)
@@ -970,6 +1172,11 @@ def main():
         log(f"Starting task: {task}", color="bold_green")
         print_progress(todo_path, state, skip_sections=args.skip_section)
         log_json("task_start", task=task, provider_idx=provider_idx)
+        update_dashboard_state(
+            current_task=task,
+            current_provider=None,
+            provider_status=build_provider_status(providers, state),
+        )
 
         prompt = build_prompt(task, prompt_template)
         task_timeout = get_task_timeout(task, subprocess_timeout, timeout_overrides)
@@ -990,6 +1197,10 @@ def main():
             provider_idx = idx  # remember where we are for next round
             log(f"Using provider: {provider.name}", color="cyan")
             log_json("provider_selected", provider=provider.name, index=idx)
+            update_dashboard_state(
+                current_provider=provider.name,
+                provider_status=build_provider_status(providers, state),
+            )
 
             attempt_success = False
             for attempt in range(1, max_retries_per_provider + 1):
@@ -1081,6 +1292,17 @@ def main():
                 log(f"Task marked complete: {task} (provider: {provider.name})", color="bold_green")
                 print_progress(todo_path, state, skip_sections=args.skip_section)
                 log_json("task_complete", task=task, provider=provider.name)
+                update_dashboard_state(
+                    current_task=None,
+                    current_provider=None,
+                    provider_status=build_provider_status(providers, state),
+                    history_entry={
+                        "task": task,
+                        "provider": provider.name,
+                        "status": "complete",
+                        "timestamp": datetime.datetime.now().isoformat(),
+                    },
+                )
                 task_done = True
                 provider_idx = (idx + 1) % len(providers)  # rotate for load balancing
                 log(f"Providers: {print_provider_status(providers, state)}", color="blue")
@@ -1088,6 +1310,17 @@ def main():
                 # Failed for a non-rate-limit reason and user didn't want a retry -> give up on task
                 log(f"Task NOT completed: {task}", color="bold_red")
                 log_json("task_failed", task=task, provider=provider.name)
+                update_dashboard_state(
+                    current_task=None,
+                    current_provider=None,
+                    provider_status=build_provider_status(providers, state),
+                    history_entry={
+                        "task": task,
+                        "provider": provider.name,
+                        "status": "failed",
+                        "timestamp": datetime.datetime.now().isoformat(),
+                    },
+                )
                 if not config.get("continue_on_failure", True):
                     log("Stopping (continue_on_failure=false).", color="bold_red")
                     notify("Orchestrator stopped", f"Task failed: {task}\ncontinue_on_failure=false")
@@ -1103,6 +1336,9 @@ def main():
                 log(f"Rotating away from exhausted provider '{provider.name}'...", color="yellow")
                 log_json("provider_exhausted", provider=provider.name)
                 provider_idx = (idx + 1) % len(providers)
+                update_dashboard_state(
+                    provider_status=build_provider_status(providers, state),
+                )
                 log(f"Providers: {print_provider_status(providers, state)}", color="blue")
                 continue
 

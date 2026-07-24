@@ -32,6 +32,14 @@ from orchestrator import (
     run_provider_stats,
     count_total_tasks,
     count_completed_tasks,
+    start_dashboard,
+    update_dashboard_state,
+    build_provider_status,
+    _dashboard_state,
+    _build_html,
+    html_escape,
+    DashboardHandler,
+    DashboardServer,
 )
 
 
@@ -695,6 +703,201 @@ class TestProviderStats(unittest.TestCase):
         self.assertIn("provider_stats", event_names)
         kwargs_list = [c.kwargs for c in mock_json.call_args_list]
         self.assertTrue(any(k.get("task") == "Test task" for k in kwargs_list))
+
+
+class TestHtmlEscape(unittest.TestCase):
+    def test_escapes_ampersand(self):
+        self.assertEqual(html_escape("&"), "&amp;")
+
+    def test_escapes_lt_gt(self):
+        self.assertEqual(html_escape("<script>"), "&lt;script&gt;")
+
+    def test_escapes_quotes(self):
+        self.assertEqual(html_escape('"hello"'), "&quot;hello&quot;")
+
+    def test_no_escape_needed(self):
+        self.assertEqual(html_escape("plain text"), "plain text")
+
+
+class TestBuildProviderStatus(unittest.TestCase):
+    def _make_provider(self, name, cooldown=0):
+        return Provider({
+            "name": name,
+            "command": "echo test",
+            "env": {},
+            "rate_limit_patterns": [],
+            "cooldown_seconds": cooldown,
+        })
+
+    def test_available_provider(self):
+        p = self._make_provider("p1")
+        state = {"provider_cooldowns": {}}
+        status = build_provider_status([p], state)
+        self.assertTrue(status["p1"]["available"])
+        self.assertIsNone(status["p1"]["cooldown_until"])
+
+    def test_cooldown_provider(self):
+        p = self._make_provider("p1")
+        soon = time.time() + 300
+        state = {"provider_cooldowns": {"p1": soon}}
+        status = build_provider_status([p], state)
+        self.assertFalse(status["p1"]["available"])
+        self.assertIsNotNone(status["p1"]["cooldown_until"])
+
+
+class TestUpdateDashboardState(unittest.TestCase):
+    def setUp(self):
+        _dashboard_state.clear()
+        _dashboard_state["start_time"] = None
+
+    def test_set_current_task(self):
+        update_dashboard_state(current_task="my task")
+        self.assertEqual(_dashboard_state["current_task"], "my task")
+
+    def test_set_current_provider(self):
+        update_dashboard_state(current_provider="my-provider")
+        self.assertEqual(_dashboard_state["current_provider"], "my-provider")
+
+    def test_set_provider_status(self):
+        status = {"p1": {"available": True, "cooldown_until": None}}
+        update_dashboard_state(provider_status=status)
+        self.assertEqual(_dashboard_state["providers"], status)
+
+    def test_append_history_entry(self):
+        entry = {"task": "T", "provider": "p", "status": "complete", "timestamp": "2026-01-01T00:00:00"}
+        update_dashboard_state(history_entry=entry)
+        self.assertEqual(len(_dashboard_state["history"]), 1)
+        self.assertEqual(_dashboard_state["history"][0], entry)
+
+    def test_history_capped_at_max(self):
+        for i in range(60):
+            update_dashboard_state(history_entry={"task": f"T{i}", "status": "complete"})
+        self.assertEqual(len(_dashboard_state["history"]), 50)
+        self.assertEqual(_dashboard_state["history"][0]["task"], "T10")
+        self.assertEqual(_dashboard_state["history"][-1]["task"], "T59")
+
+    def test_start_time_set_once(self):
+        update_dashboard_state(current_task="T")
+        first = _dashboard_state["start_time"]
+        self.assertIsNotNone(first)
+        update_dashboard_state(current_task="T2")
+        self.assertEqual(_dashboard_state["start_time"], first)
+
+
+class TestBuildHtml(unittest.TestCase):
+    def setUp(self):
+        _dashboard_state.clear()
+        _dashboard_state["start_time"] = time.time()
+
+    def test_idle_state(self):
+        html = _build_html(_dashboard_state)
+        self.assertIn("Orchestrator Dashboard", html)
+        self.assertIn("idle", html)
+        self.assertIn("No history yet", html)
+
+    def test_shows_current_task(self):
+        update_dashboard_state(current_task="Build feature X")
+        html = _build_html(_dashboard_state)
+        self.assertIn("Build feature X", html)
+
+    def test_shows_current_provider(self):
+        update_dashboard_state(current_provider="kilo")
+        html = _build_html(_dashboard_state)
+        self.assertIn("kilo", html)
+
+    def test_shows_provider_status(self):
+        status = {"kilo": {"available": True, "cooldown_until": None}}
+        update_dashboard_state(provider_status=status)
+        html = _build_html(_dashboard_state)
+        self.assertIn("available", html)
+
+    def test_shows_cooldown_status(self):
+        soon = time.time() + 300
+        status = {"kilo": {"available": False, "cooldown_until": soon}}
+        update_dashboard_state(provider_status=status)
+        html = _build_html(_dashboard_state)
+        self.assertIn("cooldown", html)
+
+    def test_shows_history(self):
+        entry = {"task": "Test task", "provider": "kilo", "status": "complete", "timestamp": "2026-01-01T00:00:00"}
+        update_dashboard_state(history_entry=entry)
+        html = _build_html(_dashboard_state)
+        self.assertIn("Test task", html)
+        self.assertIn("complete", html)
+
+    def test_failed_history_entry(self):
+        entry = {"task": "Failing task", "provider": "kilo", "status": "failed", "timestamp": "2026-01-01T00:00:00"}
+        update_dashboard_state(history_entry=entry)
+        html = _build_html(_dashboard_state)
+        self.assertIn("Failing task", html)
+        self.assertIn("failed", html)
+
+    def test_uptime_displayed(self):
+        html = _build_html(_dashboard_state)
+        self.assertIn("Uptime:", html)
+
+
+class TestDashboardServer(unittest.TestCase):
+    def setUp(self):
+        _dashboard_state.clear()
+        _dashboard_state["start_time"] = time.time()
+
+    def _find_free_port(self):
+        import socket
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("127.0.0.1", 0))
+            return s.getsockname()[1]
+
+    def test_server_starts_and_serves_html(self):
+        port = self._find_free_port()
+        server = start_dashboard(port)
+        self.assertIsNotNone(server)
+        server.server_close()
+
+    def test_json_endpoint_returns_valid_json(self):
+        import urllib.request
+        port = self._find_free_port()
+        server = start_dashboard(port)
+        self.assertIsNotNone(server)
+        try:
+            url = f"http://127.0.0.1:{port}/api/state"
+            req = urllib.request.urlopen(url, timeout=5)
+            data = json.loads(req.read().decode("utf-8"))
+            self.assertIn("current_task", data)
+            self.assertIn("providers", data)
+            self.assertIn("history", data)
+            self.assertIn("uptime_seconds", data)
+        finally:
+            server.shutdown()
+
+    def test_html_endpoint_returns_html(self):
+        import urllib.request
+        port = self._find_free_port()
+        server = start_dashboard(port)
+        self.assertIsNotNone(server)
+        try:
+            url = f"http://127.0.0.1:{port}/"
+            req = urllib.request.urlopen(url, timeout=5)
+            content = req.read().decode("utf-8")
+            self.assertIn("text/html", req.headers.get("Content-Type", ""))
+            self.assertIn("Orchestrator Dashboard", content)
+        finally:
+            server.shutdown()
+
+    def test_json_endpoint_with_state(self):
+        import urllib.request
+        update_dashboard_state(current_task="Test task", current_provider="kilo")
+        port = self._find_free_port()
+        server = start_dashboard(port)
+        self.assertIsNotNone(server)
+        try:
+            url = f"http://127.0.0.1:{port}/api/state"
+            req = urllib.request.urlopen(url, timeout=5)
+            data = json.loads(req.read().decode("utf-8"))
+            self.assertEqual(data["current_task"], "Test task")
+            self.assertEqual(data["current_provider"], "kilo")
+        finally:
+            server.shutdown()
 
 
 if __name__ == "__main__":

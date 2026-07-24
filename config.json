@@ -25,5 +25,6 @@
       "cooldown_seconds": 300,
       "stats_command": "kilo stats --json"
     }
-  ]
+  ],
+  "dashboard_port": 8765
 }
