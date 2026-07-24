@@ -27,6 +27,13 @@ Grouped by priority — work top section first.
 - [x] Activity-based stall detection (`stall_timeout_seconds`, default 600s) — separate from the wall-clock `subprocess_timeout`, kills and retries a task only if there's been genuinely zero CPU activity *and* zero file changes for that long, so a big-but-working task is never killed while a truly hung one still gets caught
 - [x] `run_forever.sh` supervisor script — auto-restarts orchestrator.py on an unexpected crash (exit 1), but never on a clean finish (exit 0) or a manual Ctrl+C (exit 130); progress always resumes from Todo.md/state.json on disk, no separate resume logic needed
 - [x] Support a per-task timeout override (e.g. a `[big]`/`[slow]` tag in the task text) instead of only a single global `subprocess_timeout` for every task regardless of size
+- [ ] Fix false-positive rate-limit detection overriding a real completion — `rate_limited` was decided by a plain substring match over the whole CLI output, so task/code text mentioning "rate limit"/"429"/"quota" (routine domain vocabulary in this repo) discarded genuinely finished work and re-sent the same task after a cooldown; only trust the match when `git diff --stat` shows no real changes happened (fixed in orchestrator.py, verify it stays fixed with a regression test — none exists yet)
+- [ ] Handle non-UTF8/malformed bytes in a provider CLI's stdout/stderr without crashing the whole run — `subprocess.run`/`Popen` currently decode with `text=True` and no `errors=` handling, so one bad byte sequence from an agent CLI raises `UnicodeDecodeError` and kills the orchestrator instead of just that task
+- [ ] Retry transient git command failures once after a short delay (e.g. `index.lock` contention) instead of treating them as hard failures — dogfooding runs kilo against this repo's own working tree, so the orchestrator's own `git diff`/`git commit`/`git status` calls can genuinely race with the agent's own git usage
+- [ ] Rotate/cap `logs/orchestrator.log` and `.jsonl` once they pass a size threshold (e.g. 10MB) instead of growing unbounded across a long-lived or multi-day run
+- [ ] File-lock `Todo.md` writes (`mark_complete`/`defer_task`) so two orchestrator processes accidentally pointed at the same `Todo.md` can't interleave writes and corrupt it
+- [ ] Exponential backoff on repeated rate-limit hits from the same provider instead of always reusing the same fixed `cooldown_seconds` — a provider that keeps getting rate-limited should back off longer each time, not retry at a fixed cadence forever
+- [ ] Validate at startup that `working_directory` is actually inside a git working tree (`git rev-parse --is-inside-work-tree`) and fail fast with a clear message, instead of every `git diff`/`git commit` call quietly no-op'ing or erroring deep inside the task loop
 
 ## P2 — Nice-to-have / Polish
 
@@ -43,3 +50,23 @@ Grouped by priority — work top section first.
 
 - [x] Minimal local dashboard via stdlib `http.server` serving current run state (current task, provider status, recent history) as JSON/HTML — replaces the "no live dashboard" limitation without adding a dependency
 - [x] Shell out to the provider's own stats command after each task (e.g. `kilo stats`) and log cost/token usage per task, where the CLI supports it
+- [ ] Write a PID/status file (e.g. `orchestrator.pid` with pid + dashboard URL + start time) on startup, removed on clean exit — today the only way to tell "is a run actually still alive, and where's its dashboard" is grepping `ps aux` or trusting the last log line, which is indistinguishable from a dead run that was killed without logging anything (hit this exact confusion — a `Dashboard available at :8765` line stayed in the log long after that process was gone)
+- [ ] Auto-retry the dashboard on the next free port if `dashboard_port` is already in use, instead of logging an `OSError` once and running the rest of that session with no dashboard at all
+- [ ] Auto-refresh the dashboard HTML page (simple JS poll of `/api/state` every few seconds) instead of requiring a manual browser refresh to see updated state
+- [ ] Explicitly shut down the dashboard `HTTPServer` (`server.shutdown()`) on both clean exit and SIGINT instead of relying on the daemon thread dying implicitly with the process
+- [ ] Add a `--list-tasks [N]` / `--peek` flag to preview the next N pending tasks (with which provider would run each) without executing anything — complements the existing `--dry-run`
+- [ ] Optional `open_dashboard_in_browser` config flag — call `webbrowser.open()` once at startup when set, so the dashboard tab opens automatically instead of relying on someone noticing and copying the URL from the log
+
+## P3 — Interactivity & Delight
+
+Cosmetic/UX only — none of these may change what gets written to `logs/orchestrator.log`/`.jsonl` or affect task pass/fail logic. Anything audio/animated must be opt-in (config flag, default off) so a real overnight unattended run stays exactly as quiet and deterministic as it is today.
+
+- [ ] Non-blocking keyboard commands while a task is running — read stdin on a background thread so a human watching an interactive session can press `p` to pause after the current task finishes, `s` to skip the current task, or `q` to quit gracefully, without resorting to Ctrl+C
+- [ ] Rotating flavor-text in the live `\r` status line/spinner (only shown when `sys.stdout.isatty()`) — a small local list of phrases (e.g. "Reticulating splines...", "Bribing the linter...") cycled in place of the plain "working" label; purely cosmetic, must never leak into the heartbeat log line
+- [ ] Small celebratory notice on milestones — every 10th task completed and on reaching 100% of `Todo.md` — distinct from the existing plain "Task marked complete" log line
+- [ ] Optional audio/voice cue on task completion or when manual confirmation is needed (e.g. macOS `say "Task complete"`), config-gated and off by default
+- [ ] Fun stats in `--summary`: longest task, shortest task, current consecutive-success streak — derived from `completed_task_durations`/existing per-task outcome logging, no new dependencies
+- [ ] Elapsed-time-aware "waiting mood" messages on the interactive spinner only (never logged) — e.g. past 5 minutes idle: "still going, might be worth a coffee ☕"; past 15: "this one's taking a while" — purely to make long waits less dead-silent in a terminal you're actively watching
+- [ ] ASCII progress bar (e.g. `[#######---] 68%`) in the interactive spinner line, driven by the same percentage `print_progress()` already computes, instead of only numeric "Task N/M"
+- [ ] Emoji/color status glyphs per provider state in `print_provider_status()` when interactive (✅ available, 🌙 cooldown Xs, 🔥 currently working) instead of plain text state names — text-only fallback stays for the log file
+- [ ] A small "run report card" printed on natural completion and available via `--summary` — total tasks, wall time, success rate, and a lighthearted one-line verdict (e.g. "clean run, no retries" vs "rough night, 4 retries") — cosmetic wrapper around stats that are already tracked, no new data collection
