@@ -517,13 +517,43 @@ def _process_group_cpu_percent(pgid):
     return total if found else None
 
 
+_GIT_LOCK_PATTERNS = [
+    "index.lock",
+    "head.lock",
+    "unable to create",
+    "locked",
+]
+
+
+def _is_transient_git_error(result):
+    """Return True if the git failure looks transient (e.g. lock contention)
+    rather than a permanent user/configuration error."""
+    if result.returncode == 0:
+        return False
+    combined = (result.stderr or "").lower() + (result.stdout or "").lower()
+    return any(p in combined for p in _GIT_LOCK_PATTERNS)
+
+
+def git_run(args, cwd=None, timeout=10):
+    """Run a git command, retrying once on transient failures (e.g. index.lock
+    contention). Returns the subprocess.CompletedProcess result."""
+    result = subprocess.run(
+        ["git"] + list(args),
+        cwd=cwd, capture_output=True, text=True, errors="replace", timeout=timeout,
+    )
+    if _is_transient_git_error(result):
+        time.sleep(0.5)
+        result = subprocess.run(
+            ["git"] + list(args),
+            cwd=cwd, capture_output=True, text=True, errors="replace", timeout=timeout,
+        )
+    return result
+
+
 def _git_dirty_count(working_directory):
     """Count files with uncommitted changes. None if not a git repo / on failure."""
     try:
-        result = subprocess.run(
-            ["git", "status", "--porcelain"],
-            cwd=working_directory, capture_output=True, text=True, errors="replace", timeout=2,
-        )
+        result = git_run(["status", "--porcelain"], cwd=working_directory)
     except Exception:
         return None
     if result.returncode != 0:
@@ -991,15 +1021,12 @@ def git_commit(config, task: str):
     if not config.get("auto_commit", False):
         return
     wd = config.get("working_directory", ".")
-    check = subprocess.run(
-        ["git", "status", "--porcelain"], cwd=wd,
-        capture_output=True, text=True, errors="replace",
-    )
+    check = git_run(["status", "--porcelain"], cwd=wd)
     if not check.stdout.strip():
         log("No changes to commit. Skipping git commit.", color="dim")
         return
-    subprocess.run(["git", "add", "-A"], cwd=wd)
-    subprocess.run(["git", "commit", "-m", f"Task: {task}"], cwd=wd)
+    git_run(["add", "-A"], cwd=wd)
+    git_run(["commit", "-m", f"Task: {task}"], cwd=wd)
 
 
 def run_provider_stats(provider, working_directory: str, task: str):
@@ -1217,10 +1244,7 @@ def main():
                 # the agent didn't get to do anything, so if files actually changed,
                 # this was a false positive on a genuine completion, not a real
                 # exhaustion event.
-                diff_stat = subprocess.run(
-                    ["git", "diff", "--stat"],
-                    cwd=working_directory, capture_output=True, text=True, errors="replace", timeout=2,
-                )
+                diff_stat = git_run(["diff", "--stat"], cwd=working_directory)
                 stat_output = diff_stat.stdout.strip() if diff_stat.returncode == 0 else ""
                 rate_limited = rate_limited and not stat_output
 
