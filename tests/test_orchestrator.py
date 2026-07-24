@@ -30,6 +30,7 @@ from orchestrator import (
     get_task_timeout,
     TAG_REGEX,
     STATE_PATH,
+    PID_PATH,
     print_summary,
     run_provider_stats,
     count_total_tasks,
@@ -39,6 +40,8 @@ from orchestrator import (
     build_provider_status,
     _dashboard_state,
     _build_html,
+    _write_pid_file,
+    _remove_pid_file,
     html_escape,
     DashboardHandler,
     DashboardServer,
@@ -312,11 +315,13 @@ class TestDryRun(unittest.TestCase):
             }))
             state_path = Path(tmpdir) / "state.json"
             state_path.write_text(json.dumps({"provider_cooldowns": {}}))
+            pid_path = Path(tmpdir) / "orchestrator.pid"
 
             with patch.object(sys, 'argv', ['orchestrator.py', '--config', str(cfg_path), '--dry-run']):
                 with patch('orchestrator.log') as mock_log:
                     with patch('orchestrator.STATE_PATH', state_path):
-                        main()
+                        with patch('orchestrator.PID_PATH', pid_path):
+                            main()
             log_output = ' '.join(str(call.args[0]) for call in mock_log.call_args_list)
             self.assertIn("Dry-run", log_output)
             self.assertIn("Task one", log_output)
@@ -355,12 +360,14 @@ class TestSuspiciousCompletion(unittest.TestCase):
             }))
             state_path = Path(tmpdir) / "state.json"
             state_path.write_text(json.dumps({"provider_cooldowns": {}}))
+            pid_path = Path(tmpdir) / "orchestrator.pid"
 
             with patch.object(sys, 'argv', ['orchestrator.py', '--config', str(cfg_path), '--once']):
                 with patch('orchestrator.STATE_PATH', state_path):
                     with patch('orchestrator.time.sleep'):
                         with patch('orchestrator.log') as mock_log:
-                            main()
+                            with patch('orchestrator.PID_PATH', pid_path):
+                                main()
 
             log_output = ' '.join(str(call.args[0]) for call in mock_log.call_args_list)
             self.assertIn("SUSPICIOUS", log_output)
@@ -392,12 +399,14 @@ class TestSuspiciousCompletion(unittest.TestCase):
             }))
             state_path = Path(tmpdir) / "state.json"
             state_path.write_text(json.dumps({"provider_cooldowns": {}}))
+            pid_path = Path(tmpdir) / "orchestrator.pid"
 
             with patch.object(sys, 'argv', ['orchestrator.py', '--config', str(cfg_path), '--once']):
                 with patch('orchestrator.STATE_PATH', state_path):
                     with patch('orchestrator.time.sleep'):
                         with patch('orchestrator.log') as mock_log:
-                            main()
+                            with patch('orchestrator.PID_PATH', pid_path):
+                                main()
 
             log_output = ' '.join(str(call.args[0]) for call in mock_log.call_args_list)
             self.assertNotIn("SUSPICIOUS", log_output)
@@ -446,12 +455,14 @@ class TestRateLimitFalsePositive(unittest.TestCase):
             }))
             state_path = Path(tmpdir) / "state.json"
             state_path.write_text(json.dumps({"provider_cooldowns": {}}))
+            pid_path = Path(tmpdir) / "orchestrator.pid"
 
             with patch.object(sys, 'argv', ['orchestrator.py', '--config', str(cfg_path), '--once']):
                 with patch('orchestrator.STATE_PATH', state_path):
                     with patch('orchestrator.time.sleep'):
                         with patch('orchestrator.log') as mock_log:
-                            main()
+                            with patch('orchestrator.PID_PATH', pid_path):
+                                main()
 
             log_output = ' '.join(str(call.args[0]) for call in mock_log.call_args_list)
             self.assertNotIn("marked exhausted", log_output)
@@ -496,12 +507,14 @@ class TestRateLimitFalsePositive(unittest.TestCase):
             }))
             state_path = Path(tmpdir) / "state.json"
             state_path.write_text(json.dumps({"provider_cooldowns": {}}))
+            pid_path = Path(tmpdir) / "orchestrator.pid"
 
             with patch.object(sys, 'argv', ['orchestrator.py', '--config', str(cfg_path), '--once']):
                 with patch('orchestrator.STATE_PATH', state_path):
                     with patch('orchestrator.time.sleep'):
                         with patch('orchestrator.log') as mock_log:
-                            main()
+                            with patch('orchestrator.PID_PATH', pid_path):
+                                main()
 
             log_output = ' '.join(str(call.args[0]) for call in mock_log.call_args_list)
             self.assertIn("marked exhausted", log_output)
@@ -540,6 +553,7 @@ class TestSkipTask(unittest.TestCase):
             }))
             state_path = Path(tmpdir) / "state.json"
             state_path.write_text(json.dumps({"provider_cooldowns": {}}))
+            pid_path = Path(tmpdir) / "orchestrator.pid"
 
             inputs = ["skip-task", "y", "y"]
             with patch.object(sys, 'argv', ['orchestrator.py', '--config', str(cfg_path)]):
@@ -547,7 +561,8 @@ class TestSkipTask(unittest.TestCase):
                     with patch('builtins.input', side_effect=inputs):
                         with patch('orchestrator.time.sleep'):
                             with patch('orchestrator.log') as mock_log:
-                                main()
+                                with patch('orchestrator.PID_PATH', pid_path):
+                                    main()
             log_output = ' '.join(str(call.args[0]) for call in mock_log.call_args_list)
             self.assertIn("deferred", log_output)
             final_text = todo.read_text()

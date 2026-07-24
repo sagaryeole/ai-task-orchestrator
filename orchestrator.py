@@ -29,6 +29,7 @@ import os
 import shlex
 import signal
 import argparse
+import atexit
 import datetime
 import fcntl
 from contextlib import contextmanager
@@ -37,6 +38,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 
 CONFIG_PATH = Path("config.json")
 STATE_PATH = Path("state.json")
+PID_PATH = Path("orchestrator.pid")
 LOG_DIR = Path("logs")
 LOG_MAX_BYTES = 10 * 1024 * 1024  # 10 MB per file
 LOG_BACKUP_COUNT = 5
@@ -80,6 +82,22 @@ def _rotate_log_file(log_path):
         if src.exists():
             src.rename(dst)
     log_path.rename(Path(str(log_path) + ".1"))
+
+
+def _write_pid_file(dashboard_url):
+    record = {
+        "pid": os.getpid(),
+        "dashboard_url": dashboard_url,
+        "start_time": datetime.datetime.now().isoformat(),
+    }
+    PID_PATH.write_text(json.dumps(record, indent=2) + "\n")
+
+
+def _remove_pid_file():
+    try:
+        PID_PATH.unlink()
+    except OSError:
+        pass
 
 
 # --------------------------------------------------------------------------
@@ -133,6 +151,10 @@ _INTERACTIVE_LAUNCHERS = {
     "cursor": {
         "headless_flags": [],
         "message": "Cursor is an editor, not a headless agent CLI.",
+    },
+    "copilot": {
+        "headless_flags": ["--allow-all-tools", "--yolo", "--allow-all"],
+        "message": "GitHub Copilot CLI prompts for tool approval by default; use --allow-all-tools (or --yolo) for unattended runs.",
     },
 }
 
@@ -685,7 +707,11 @@ class Provider:
             log(f"Provider '{self.name}' rate-limit counter reset (provider responded without rate-limiting).", color="dim")
 
     def run(self, prompt: str, working_directory: str, task_timeout=None):
-        """Run this provider's command with the prompt on stdin.
+        """Run this provider's command with the prompt on stdin, unless the
+        command contains a literal ``{{TASK}}`` token -- some agent CLIs (e.g.
+        GitHub Copilot CLI's ``-p <text>``) take the prompt as an argv element
+        rather than reading stdin, so that token is substituted with the full
+        prompt as a single argument instead, and stdin is left empty.
         Returns (exit_code, combined_output, looked_rate_limited: bool).
         ``task_timeout`` overrides ``self.subprocess_timeout`` for this single
         run when provided."""
@@ -693,6 +719,11 @@ class Provider:
         env = os.environ.copy()
         env.update(self.env)
         cmd = shlex.split(self.command)
+        if "{{TASK}}" in cmd:
+            cmd = [prompt if tok == "{{TASK}}" else tok for tok in cmd]
+            stdin_input = ""
+        else:
+            stdin_input = prompt
         try:
             process = subprocess.Popen(
                 cmd,
@@ -711,7 +742,7 @@ class Provider:
 
         _current_process = process
         try:
-            return self._wait_for_result(process, prompt, working_directory, task_timeout)
+            return self._wait_for_result(process, stdin_input, working_directory, task_timeout)
         finally:
             _current_process = None
 
@@ -1170,6 +1201,7 @@ def _sigint_handler(signum, frame):
         except (ProcessLookupError, PermissionError):
             pass
     save_state(load_state())
+    _remove_pid_file()
     # 130 is the conventional exit code for a SIGINT-terminated process. A
     # supervisor script uses this to tell "user asked to stop" apart from
     # "crashed" -- it must never auto-restart after an intentional interrupt.
@@ -1218,6 +1250,8 @@ def main():
     LOG_BACKUP_COUNT = config.get("log_backup_count", 5)
 
     state = load_state()
+    atexit.register(_remove_pid_file)
+
     subprocess_timeout = config.get("subprocess_timeout", 180)
     stall_timeout = config.get("stall_timeout_seconds", 600)
     timeout_overrides = config.get("subprocess_timeout_overrides", {})
@@ -1226,6 +1260,8 @@ def main():
 
     dashboard_port = config.get("dashboard_port")
     dashboard_server = start_dashboard(dashboard_port)
+    dashboard_url = f"http://127.0.0.1:{dashboard_port}" if isinstance(dashboard_port, int) and dashboard_port > 0 else None
+    _write_pid_file(dashboard_url)
     _dashboard_state["start_time"] = time.time()
 
     todo_path = Path(config["todo_file"])
@@ -1239,7 +1275,8 @@ def main():
     if not todo_path.exists():
         sys.exit(f"Todo file not found: {todo_path}")
 
-    if args.dry_run:
+    try:
+        if args.dry_run:
         tasks = load_tasks(todo_path, skip_sections=args.skip_section)
         if not tasks:
             log("Dry-run: no pending tasks.")
@@ -1469,6 +1506,8 @@ def main():
         if args.once:
             log("--once flag set. Exiting after one task.", color="dim")
             break
+    finally:
+        _remove_pid_file()
 
 
 if __name__ == "__main__":
