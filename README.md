@@ -153,6 +153,7 @@ Example:
 - `--dry-run` — print the next task and provider without executing anything
 - `--once` — run a single task and exit
 - `--json-logs` — append structured JSON log lines to `logs/orchestrator.jsonl` alongside normal logs
+- `--summary` — print a summary of today's run statistics (tasks completed, success rate, total run time, average time per task) and exit
 
 ## Known Limitations / Follow-ups
 

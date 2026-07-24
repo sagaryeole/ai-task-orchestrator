@@ -327,6 +327,61 @@ def format_duration(seconds):
         return f"{h}h {m}m"
 
 
+def print_summary(state, todo_path, log_path=None):
+    if log_path is None:
+        log_path = LOG_DIR / "orchestrator.log"
+    today_str = datetime.date.today().isoformat()
+
+    completed_today = 0
+    failed_today = 0
+    first_ts = None
+    last_ts = None
+
+    if log_path.exists():
+        for line in log_path.read_text().splitlines():
+            if not line.startswith(f"[{today_str}"):
+                continue
+            ts_str, _, msg = line.partition("] ")
+            ts_str = ts_str.lstrip("[")
+            try:
+                ts = datetime.datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                continue
+            if first_ts is None or ts < first_ts:
+                first_ts = ts
+            if last_ts is None or ts > last_ts:
+                last_ts = ts
+            if "Task marked complete:" in msg:
+                completed_today += 1
+            elif "Task NOT completed:" in msg:
+                failed_today += 1
+
+    total_attempts = completed_today + failed_today
+    if first_ts and last_ts:
+        total_run_seconds = (last_ts - first_ts).total_seconds()
+    else:
+        total_run_seconds = 0
+
+    durations = state.get("completed_task_durations", [])
+    avg_duration = sum(durations) / len(durations) if durations else None
+
+    print("=" * 60)
+    print(f"Summary ({today_str})")
+    print("=" * 60)
+    print(f"Tasks completed today: {completed_today}")
+    if total_attempts > 0:
+        pct = (completed_today / total_attempts) * 100
+        print(f"Success rate: {completed_today}/{total_attempts} ({pct:.0f}%)")
+    else:
+        print("Success rate: N/A (no tasks attempted today)")
+    print(f"Total run time: {format_duration(total_run_seconds)}")
+    if avg_duration is not None:
+        print(f"Average time per task: {format_duration(avg_duration)}")
+    else:
+        print("Average time per task: N/A")
+    print("=" * 60)
+
+
 def print_progress(todo_path: Path, state):
     completed = count_completed_tasks(todo_path)
     total = count_total_tasks(todo_path)
@@ -460,7 +515,7 @@ class Provider:
         self.command = cfg["command"]
         self.env = cfg.get("env", {})
         self.rate_limit_patterns = [p.lower() for p in cfg.get("rate_limit_patterns", [])]
-        self.cooldown_seconds = cfg.get("cooldown_seconds", 3600)
+        self.cooldown_seconds = cfg.get("cooldown_seconds", 600)
         self.subprocess_timeout = subprocess_timeout
         # Unlike subprocess_timeout (a hard wall-clock cap), stall_timeout is
         # activity-based: it only fires if there's been no CPU usage AND no
@@ -750,6 +805,10 @@ def main():
         "--json-logs", action="store_true",
         help="Append structured JSON log lines to logs/orchestrator.jsonl alongside normal logs"
     )
+    parser.add_argument(
+        "--summary", action="store_true",
+        help="Print a summary of today's run statistics and exit"
+    )
     args = parser.parse_args()
 
     config = load_config(Path(args.config))
@@ -794,6 +853,10 @@ def main():
             log(f"  Command: {provider.command}")
             log(f"  Cooldown remaining: {max(0, int(state['provider_cooldowns'].get(provider.name, 0) - time.time()))}s")
             log_json("dry_run", provider=provider.name, task=task, wait_seconds=max(0, int(state['provider_cooldowns'].get(provider.name, 0) - time.time())))
+        return
+
+    if args.summary:
+        print_summary(state, todo_path)
         return
 
     provider_idx = 0  # round-robin cursor across tasks

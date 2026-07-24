@@ -4,6 +4,8 @@ import os
 import json
 import time
 import re
+import io
+import datetime
 
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
@@ -26,6 +28,7 @@ from orchestrator import (
     get_task_timeout,
     TAG_REGEX,
     STATE_PATH,
+    print_summary,
 )
 
 
@@ -133,11 +136,19 @@ class TestProviderAvailability(unittest.TestCase):
         self.assertTrue(p.is_available(state))
 
     def test_mark_exhausted(self):
-        p = Provider({"name": "p", "command": "echo", "env": {}, "rate_limit_patterns": []})
-        state = {"provider_cooldowns": {}}
-        p.mark_exhausted(state)
-        self.assertFalse(p.is_available(state))
-        self.assertIn("p", state["provider_cooldowns"])
+        # mark_exhausted() calls the real save_state(), which writes to
+        # STATE_PATH -- without patching it, this test silently overwrites
+        # the real project's live state.json with fake "p" fixture data
+        # every time it runs, corrupting real provider cooldown tracking.
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_path = Path(tmpdir) / "state.json"
+            with patch('orchestrator.STATE_PATH', state_path):
+                p = Provider({"name": "p", "command": "echo", "env": {}, "rate_limit_patterns": []})
+                state = {"provider_cooldowns": {}}
+                p.mark_exhausted(state)
+                self.assertFalse(p.is_available(state))
+                self.assertIn("p", state["provider_cooldowns"])
 
 
 class TestValidateConfig(unittest.TestCase):
@@ -394,6 +405,92 @@ class TestTagRegex(unittest.TestCase):
 
     def test_no_tags(self):
         self.assertEqual(re.findall(TAG_REGEX, "normal task"), [])
+
+
+class TestPrintSummary(unittest.TestCase):
+    def test_summary_counts_today(self):
+        from unittest.mock import patch
+        today = datetime.date.today().isoformat()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_dir = Path(tmpdir) / "logs"
+            log_dir.mkdir()
+            log_file = log_dir / "orchestrator.log"
+            log_file.write_text(
+                f"[{today} 10:00:00] Starting task: A\n"
+                f"[{today} 10:01:00] Task marked complete: A (provider: p)\n"
+                f"[{today} 10:02:00] Starting task: B\n"
+                f"[{today} 10:03:00] Task NOT completed: B\n"
+            )
+            todo = Path(tmpdir) / "Todo.md"
+            todo.write_text("- [ ] C\n")
+            state = {"completed_task_durations": [60.0, 120.0]}
+            fake_stdout = io.StringIO()
+            with patch('sys.stdout', fake_stdout):
+                with patch('orchestrator.LOG_DIR', log_dir):
+                    print_summary(state, todo, log_path=log_file)
+            output = fake_stdout.getvalue()
+            self.assertIn("Tasks completed today: 1", output)
+            self.assertIn("Success rate: 1/2 (50%)", output)
+            self.assertIn("Average time per task: 1m 30s", output)
+
+    def test_summary_no_tasks_today(self):
+        from unittest.mock import patch
+        today = datetime.date.today().isoformat()
+        yesterday = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_dir = Path(tmpdir) / "logs"
+            log_dir.mkdir()
+            log_file = log_dir / "orchestrator.log"
+            log_file.write_text(
+                f"[{yesterday} 10:00:00] Task marked complete: old (provider: p)\n"
+            )
+            todo = Path(tmpdir) / "Todo.md"
+            todo.write_text("- [ ] C\n")
+            state = {"completed_task_durations": []}
+            fake_stdout = io.StringIO()
+            with patch('sys.stdout', fake_stdout):
+                with patch('orchestrator.LOG_DIR', log_dir):
+                    print_summary(state, todo, log_path=log_file)
+            output = fake_stdout.getvalue()
+            self.assertIn("Tasks completed today: 0", output)
+            self.assertIn("Success rate: N/A", output)
+            self.assertIn("Average time per task: N/A", output)
+
+
+class TestSummaryFlag(unittest.TestCase):
+    def test_summary_flag_exits_cleanly(self):
+        from unittest.mock import patch
+        from orchestrator import main
+
+        today = datetime.date.today().isoformat()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            todo = Path(tmpdir) / "Todo.md"
+            todo.write_text("- [ ] Task one\n")
+            cfg_path = Path(tmpdir) / "config.json"
+            cfg_path.write_text(json.dumps({
+                "todo_file": str(todo),
+                "providers": [{"name": "p", "command": "echo hello", "env": {}, "rate_limit_patterns": []}],
+            }))
+            state_path = Path(tmpdir) / "state.json"
+            state_path.write_text(json.dumps({"provider_cooldowns": {}}))
+
+            log_dir = Path(tmpdir) / "logs"
+            log_dir.mkdir()
+            log_file = log_dir / "orchestrator.log"
+            log_file.write_text(
+                f"[{today} 10:00:00] Starting task: Task one\n"
+                f"[{today} 10:01:00] Task marked complete: Task one (provider: p)\n"
+            )
+
+            fake_stdout = io.StringIO()
+            with patch.object(sys, 'argv', ['orchestrator.py', '--config', str(cfg_path), '--summary']):
+                with patch('orchestrator.STATE_PATH', state_path):
+                    with patch('orchestrator.LOG_DIR', log_dir):
+                        with patch('sys.stdout', fake_stdout):
+                            main()
+            output = fake_stdout.getvalue()
+            self.assertIn("Summary", output)
+            self.assertIn("Tasks completed today: 1", output)
 
 
 if __name__ == "__main__":
