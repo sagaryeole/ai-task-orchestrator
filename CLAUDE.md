@@ -8,7 +8,7 @@ An AI-agnostic orchestrator (single file, `orchestrator.py`) that drives a codin
 
 Pure Python 3 standard library only (`subprocess`, `json`, `re`, `time`, `threading`, `pathlib`, `datetime`, `argparse`) — no dependencies to install, no build step.
 
-**This repo dogfoods itself**: a local `task-orchestrator.config.json` (gitignored — not checked in) targets this repo's own `Todo.md`, so `orchestrator.py` can be used to drive its own development. Be aware when editing `orchestrator.py` that a running instance may have this file open as its own target.
+**This repo dogfoods itself**: `task-orchestrator.config.json` here targets this repo's own `Todo.md`, so `orchestrator.py` can be used to drive its own development. Be aware when editing `orchestrator.py` that a running instance may have this file open as its own target. Unlike a client project (where `task-orchestrator init` gitignores this filename by default, since a real provider `env` block commonly holds API keys), this repo's own config files carry no secrets and are committed deliberately.
 
 ## Running it
 

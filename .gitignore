@@ -1,12 +1,10 @@
-# Any task-orchestrator.config*.json variant (task-orchestrator.config.json,
-# task-orchestrator.config.copilot.json, etc.) commonly holds provider API
-# keys and must never be committed -- except the schema file, which is a
-# static JSON Schema doc with no secrets and is meant to ship with the repo.
-task-orchestrator.config*.json
-!task-orchestrator.config.schema.json
-task-orchestrator.config*.json.bak
-config.json
-config.json.bak
+# This repo's own task-orchestrator.config*.json files are tracked
+# deliberately -- they're the dogfood config that drives this repo's own
+# Todo.md and carry no secrets (provider CLIs handle their own auth).
+# task_orchestrator.cli's `init` command still gitignores this filename
+# pattern by default in *other* projects that install the tool, since a
+# client project's provider `env` block commonly does hold real API keys.
+*.bak
 state.json
 orchestrator.pid
 logs/
