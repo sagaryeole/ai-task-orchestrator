@@ -273,8 +273,30 @@ def notify(title, message):
 # Todo handling
 # --------------------------------------------------------------------------
 
-def load_tasks(todo_path: Path):
-    return re.findall(TASK_REGEX, todo_path.read_text())
+def _get_section_for_line(text: str, target_line: str) -> str:
+    """Return the header text for the section containing the given task line,
+    or '' if it is not under any header. Headers are lines matching ^#{1,6} .
+    """
+    current_header = ""
+    for line in text.splitlines():
+        stripped = line.strip()
+        if re.match(r"^#{1,6}\s+.+", stripped):
+            current_header = stripped.lstrip("#").strip()
+        elif stripped == target_line.strip():
+            return current_header
+    return ""
+
+
+def load_tasks(todo_path: Path, skip_sections=None):
+    skip_sections = [s.lower() for s in (skip_sections or [])]
+    if not skip_sections:
+        return re.findall(TASK_REGEX, todo_path.read_text())
+    text = todo_path.read_text()
+    all_tasks = re.findall(TASK_REGEX, text)
+    return [
+        t for t in all_tasks
+        if _get_section_for_line(text, f"- [ ] {t}").lower() not in skip_sections
+    ]
 
 
 def mark_complete(todo_path: Path, task: str):
@@ -298,14 +320,41 @@ def defer_task(todo_path: Path, task: str):
     todo_path.write_text(text)
 
 
-def count_total_tasks(todo_path: Path):
+def count_total_tasks(todo_path: Path, skip_sections=None):
     text = todo_path.read_text()
-    return len(re.findall(r"- \[( |x)\] .+", text))
+    all_tasks = re.findall(r"- \[( |x)\] .+", text)
+    skip_sections = [s.lower() for s in (skip_sections or [])]
+    if not skip_sections:
+        return len(all_tasks)
+    task_lines = re.findall(r"^(- \[.\] .+)$", text, re.MULTILINE)
+    skipped = set()
+    current_header = ""
+    for line in text.splitlines():
+        stripped = line.strip()
+        if re.match(r"^#{1,6}\s+.+", stripped):
+            current_header = stripped.lstrip("#").strip()
+        elif re.match(r"^- \[.\] .+", stripped):
+            if current_header.lower() in skip_sections:
+                skipped.add(stripped)
+    return len(all_tasks) - len(skipped)
 
 
-def count_completed_tasks(todo_path: Path):
+def count_completed_tasks(todo_path: Path, skip_sections=None):
     text = todo_path.read_text()
-    return len(re.findall(r"- \[x\] .+", text))
+    all_done = re.findall(r"- \[x\] .+", text)
+    skip_sections = [s.lower() for s in (skip_sections or [])]
+    if not skip_sections:
+        return len(all_done)
+    skipped = set()
+    current_header = ""
+    for line in text.splitlines():
+        stripped = line.strip()
+        if re.match(r"^#{1,6}\s+.+", stripped):
+            current_header = stripped.lstrip("#").strip()
+        elif re.match(r"^- \[x\] .+", stripped):
+            if current_header.lower() in skip_sections:
+                skipped.add(stripped)
+    return len(all_done) - len(skipped)
 
 
 def format_duration(seconds):
@@ -382,9 +431,9 @@ def print_summary(state, todo_path, log_path=None):
     print("=" * 60)
 
 
-def print_progress(todo_path: Path, state):
-    completed = count_completed_tasks(todo_path)
-    total = count_total_tasks(todo_path)
+def print_progress(todo_path: Path, state, skip_sections=None):
+    completed = count_completed_tasks(todo_path, skip_sections=skip_sections)
+    total = count_total_tasks(todo_path, skip_sections=skip_sections)
     if total == 0:
         return
 
@@ -806,6 +855,10 @@ def main():
         help="Append structured JSON log lines to logs/orchestrator.jsonl alongside normal logs"
     )
     parser.add_argument(
+        "--skip-section", action="append", default=[],
+        help="Exclude tasks under a Todo.md section (markdown header) from being processed. Repeatable."
+    )
+    parser.add_argument(
         "--summary", action="store_true",
         help="Print a summary of today's run statistics and exit"
     )
@@ -835,7 +888,7 @@ def main():
         sys.exit(f"Todo file not found: {todo_path}")
 
     if args.dry_run:
-        tasks = load_tasks(todo_path)
+        tasks = load_tasks(todo_path, skip_sections=args.skip_section)
         if not tasks:
             log("Dry-run: no pending tasks.")
             log_json("dry_run", no_tasks=True)
@@ -859,12 +912,15 @@ def main():
         print_summary(state, todo_path)
         return
 
+    if args.skip_section:
+        log(f"Skipping sections: {', '.join(args.skip_section)}", color="yellow")
+
     provider_idx = 0  # round-robin cursor across tasks
 
     while True:
-        tasks = load_tasks(todo_path)
+        tasks = load_tasks(todo_path, skip_sections=args.skip_section)
         if not tasks:
-            print_progress(todo_path, state)
+            print_progress(todo_path, state, skip_sections=args.skip_section)
             log("All tasks completed. Exiting.", color="bold_green")
             notify("All tasks completed", "All tasks in Todo.md are done")
             break
@@ -873,7 +929,7 @@ def main():
         task_start_time = time.time()
         log("=" * 60, color="dim")
         log(f"Starting task: {task}", color="bold_green")
-        print_progress(todo_path, state)
+        print_progress(todo_path, state, skip_sections=args.skip_section)
         log_json("task_start", task=task, provider_idx=provider_idx)
 
         prompt = build_prompt(task, prompt_template)
@@ -964,7 +1020,7 @@ def main():
                 save_state(state)
                 git_commit(config, task)
                 log(f"Task marked complete: {task} (provider: {provider.name})", color="bold_green")
-                print_progress(todo_path, state)
+                print_progress(todo_path, state, skip_sections=args.skip_section)
                 log_json("task_complete", task=task, provider=provider.name)
                 task_done = True
                 provider_idx = (idx + 1) % len(providers)  # rotate for load balancing
