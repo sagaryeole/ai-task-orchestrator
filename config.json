@@ -10,6 +10,10 @@
   "continue_on_failure": true,
   "auto_commit": true,
   "verify_commands": ["python3 -m unittest discover -s tests"],
+  "subprocess_timeout_overrides": {
+    "[big]": 900,
+    "[slow]": 1800
+  },
 
   "providers": [
     {

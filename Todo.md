@@ -26,7 +26,7 @@ Grouped by priority — work top section first.
 - [x] Wrap main()'s loop in a top-level try/except so an unhandled exception saves state and logs the full traceback before exiting, instead of dying in a worse spot than a clean SIGINT does today — exits 1 on crash, 130 on SIGINT, 0 on normal/intentional stop, so a supervisor script can tell them apart
 - [x] Activity-based stall detection (`stall_timeout_seconds`, default 600s) — separate from the wall-clock `subprocess_timeout`, kills and retries a task only if there's been genuinely zero CPU activity *and* zero file changes for that long, so a big-but-working task is never killed while a truly hung one still gets caught
 - [x] `run_forever.sh` supervisor script — auto-restarts orchestrator.py on an unexpected crash (exit 1), but never on a clean finish (exit 0) or a manual Ctrl+C (exit 130); progress always resumes from Todo.md/state.json on disk, no separate resume logic needed
-- [ ] Support a per-task timeout override (e.g. a `[big]`/`[slow]` tag in the task text) instead of only a single global `subprocess_timeout` for every task regardless of size
+- [x] Support a per-task timeout override (e.g. a `[big]`/`[slow]` tag in the task text) instead of only a single global `subprocess_timeout` for every task regardless of size
 
 ## P2 — Nice-to-have / Polish
 

@@ -3,6 +3,7 @@ import tempfile
 import os
 import json
 import time
+import re
 
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
@@ -22,6 +23,8 @@ from orchestrator import (
     run_verification,
     lint_config,
     lint_todo,
+    get_task_timeout,
+    TAG_REGEX,
     STATE_PATH,
 )
 
@@ -350,6 +353,47 @@ class TestLintTodo(unittest.TestCase):
         with patch('orchestrator.log') as mock_log:
             lint_todo(Path("/nonexistent/path/Todo.md"))
         self.assertEqual(mock_log.call_count, 0)
+
+
+class TestGetTaskTimeout(unittest.TestCase):
+    def test_no_overrides_returns_global(self):
+        self.assertEqual(get_task_timeout("do stuff", 180, {}), 180)
+
+    def test_none_global_no_overrides(self):
+        self.assertIsNone(get_task_timeout("do stuff", None, {}))
+
+    def test_tag_matches_override(self):
+        overrides = {"[big]": 900, "[slow]": 1800}
+        self.assertEqual(get_task_timeout("[big] Refactor", 180, overrides), 900)
+
+    def test_multiple_tags_picks_largest(self):
+        overrides = {"[big]": 900, "[slow]": 1800}
+        self.assertEqual(get_task_timeout("[big] [slow] Refactor", 180, overrides), 1800)
+
+    def test_unmatched_tag_ignored(self):
+        overrides = {"[big]": 900}
+        self.assertEqual(get_task_timeout("[tiny] Do thing", 180, overrides), 180)
+
+    def test_empty_overrides_dict(self):
+        self.assertEqual(get_task_timeout("[big] Thing", 180, {}), 180)
+
+    def test_none_overrides(self):
+        self.assertEqual(get_task_timeout("[big] Thing", 180, None), 180)
+
+    def test_case_sensitive_tags(self):
+        overrides = {"[big]": 900}
+        self.assertEqual(get_task_timeout("[BIG] Thing", 180, overrides), 180)
+
+
+class TestTagRegex(unittest.TestCase):
+    def test_single_tag(self):
+        self.assertEqual(re.findall(TAG_REGEX, "[big] task"), ["[big]"])
+
+    def test_multiple_tags(self):
+        self.assertEqual(re.findall(TAG_REGEX, "[big] [slow] task"), ["[big]", "[slow]"])
+
+    def test_no_tags(self):
+        self.assertEqual(re.findall(TAG_REGEX, "normal task"), [])
 
 
 if __name__ == "__main__":

@@ -36,6 +36,7 @@ CONFIG_PATH = Path("config.json")
 STATE_PATH = Path("state.json")
 LOG_DIR = Path("logs")
 TASK_REGEX = r"- \[ \] (.+)"
+TAG_REGEX = r"(\[\w+\])"
 STALL_CPU_THRESHOLD = 12.0  # %cpu below this counts as "idle" for stall detection.
 # Calibrated from real observed data: a genuinely stalled process read 0-4%
 # CPU (event-loop/GC noise, not real work) and kept resetting the stall timer
@@ -289,6 +290,23 @@ def build_prompt(task: str, template_path: Path):
     )
 
 
+def get_task_timeout(task_text: str, global_timeout, overrides: dict):
+    """Return the effective subprocess timeout for a task.
+
+    Looks for bracket tags like [big] or [slow] in the task text; if any
+    match keys in ``overrides``, the largest matching timeout wins.
+    Falls back to ``global_timeout`` when there are no matches.
+    A None ``global_timeout`` means \"no limit\" and is propagated as-is.
+    """
+    if not overrides:
+        return global_timeout
+    tags = re.findall(TAG_REGEX, task_text)
+    matching = [overrides[t] for t in tags if t in overrides]
+    if not matching:
+        return global_timeout
+    return max(matching)
+
+
 # --------------------------------------------------------------------------
 # Liveness heartbeat
 # --------------------------------------------------------------------------
@@ -391,19 +409,16 @@ class Provider:
         save_state(state)
         log(f"Provider '{self.name}' marked exhausted. Cooling down for {self.cooldown_seconds}s.", color="yellow")
 
-    def run(self, prompt: str, working_directory: str):
+    def run(self, prompt: str, working_directory: str, task_timeout=None):
         """Run this provider's command with the prompt on stdin.
-        Returns (exit_code, combined_output, looked_rate_limited: bool)."""
+        Returns (exit_code, combined_output, looked_rate_limited: bool).
+        ``task_timeout`` overrides ``self.subprocess_timeout`` for this single
+        run when provided."""
         global _current_process
         env = os.environ.copy()
         env.update(self.env)
         cmd = shlex.split(self.command)
         try:
-            # Run in its own process group (not just its own process) so that on
-            # timeout -- or SIGINT -- we can kill any descendants it spawns too.
-            # Some agent CLIs are launcher scripts that spawn the real worker as
-            # a child of their own rather than exec'ing into it -- killing only
-            # the direct child leaves that worker running, orphaned.
             process = subprocess.Popen(
                 cmd,
                 stdin=subprocess.PIPE,
@@ -420,11 +435,11 @@ class Provider:
 
         _current_process = process
         try:
-            return self._wait_for_result(process, prompt, working_directory)
+            return self._wait_for_result(process, prompt, working_directory, task_timeout)
         finally:
             _current_process = None
 
-    def _wait_for_result(self, process, prompt, working_directory):
+    def _wait_for_result(self, process, prompt, working_directory, task_timeout=None):
         # provider.run() blocks for the whole task (the agent CLI's own output
         # is captured, not streamed), so without this the terminal would sit
         # silent for the entire run. Do the actual communicate() on a
@@ -454,11 +469,12 @@ class Provider:
         last_dirty_count = None
         last_activity_time = start  # last time we saw real CPU or a file-change, for stall detection
         stalled = False
+        effective_timeout = task_timeout if task_timeout is not None else self.subprocess_timeout
         while comm_thread.is_alive():
             elapsed = time.time() - start
-            # subprocess_timeout of None means "no limit" -- just keep polling
+            # effective_timeout of None means "no limit" -- just keep polling
             # and showing the spinner for as long as the task takes.
-            if self.subprocess_timeout is not None and elapsed >= self.subprocess_timeout:
+            if effective_timeout is not None and elapsed >= effective_timeout:
                 break
 
             now = time.time()
@@ -521,8 +537,9 @@ class Provider:
                     f"{self.stall_timeout}s despite still running. Killing and treating as failed.", color="bold_red")
                 log_json("provider_stalled", provider=self.name, stall_timeout=self.stall_timeout)
                 return 124, f"Stalled: no activity for {self.stall_timeout}s", False
-            log(f"Provider '{self.name}' timed out after {self.subprocess_timeout}s.", color="bold_red")
-            return 124, f"Timed out after {self.subprocess_timeout}s", False
+            label = f"{effective_timeout}s" if effective_timeout is not None else "the configured limit"
+            log(f"Provider '{self.name}' timed out after {label}.", color="bold_red")
+            return 124, f"Timed out after {label}", False
 
         stdout = result.get("stdout", "")
         stderr = result.get("stderr", "")
@@ -671,6 +688,7 @@ def main():
     state = load_state()
     subprocess_timeout = config.get("subprocess_timeout", 180)
     stall_timeout = config.get("stall_timeout_seconds", 600)
+    timeout_overrides = config.get("subprocess_timeout_overrides", {})
     providers = load_providers(config, subprocess_timeout=subprocess_timeout, stall_timeout=stall_timeout)
     log(f"Providers: {print_provider_status(providers, state)}", color="blue")
 
@@ -719,6 +737,9 @@ def main():
         log_json("task_start", task=task, provider_idx=provider_idx)
 
         prompt = build_prompt(task, prompt_template)
+        task_timeout = get_task_timeout(task, subprocess_timeout, timeout_overrides)
+        if task_timeout != subprocess_timeout:
+            log(f"Task timeout override: {task_timeout}s (global: {subprocess_timeout}s)", color="magenta")
         task_done = False
 
         while not task_done:
@@ -737,7 +758,7 @@ def main():
             attempt_success = False
             for attempt in range(1, max_retries_per_provider + 1):
                 log(f"[{provider.name}] attempt {attempt}/{max_retries_per_provider}", color="dim")
-                exit_code, output, rate_limited = provider.run(prompt, working_directory)
+                exit_code, output, rate_limited = provider.run(prompt, working_directory, task_timeout)
                 exit_color = "yellow" if rate_limited else ("green" if exit_code == 0 else "red")
                 log(f"[{provider.name}] exit code {exit_code}"
                     + (" (looked rate-limited)" if rate_limited else ""), color=exit_color)
