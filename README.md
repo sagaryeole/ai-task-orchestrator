@@ -166,6 +166,7 @@ If every provider is on cooldown at once, the orchestrator sleeps until the earl
 | `prompt_template` | Path to the prompt template file (`{{TASK}}` is replaced with the task text) |
 | `delay_seconds` | Pause after each successfully completed task |
 | `max_retries_per_provider` | Retries on the same provider before treating it as a failure (not used for rate-limit hits — those rotate immediately) |
+| `tasks_per_batch` | Bundle up to this many pending tasks (default `1`, max `5`) into a single agent invocation and a single `verify_commands` run, amortizing build/test overhead across them. Completion is all-or-nothing for the whole batch — if verification fails or nothing changed, none of the batch's tasks are marked complete, the same as a single failed task today. |
 | `require_manual_confirmation` | If `true`, you approve each task result (`y`/`n`/`retry`/`skip-provider`) before it's marked complete |
 | `continue_on_failure` | If `false`, the orchestrator stops entirely on the first task that can't be completed |
 | `auto_commit` | If `true`, runs `git add -A && git commit` after each completed task |

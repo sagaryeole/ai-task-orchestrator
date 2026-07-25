@@ -572,6 +572,152 @@ class TestRateLimitFalsePositive(unittest.TestCase):
             self.assertIn("- [ ] Task one", final_text)
 
 
+class TestTasksPerBatch(unittest.TestCase):
+    """tasks_per_batch bundles up to N pending tasks into one agent invocation
+    and one verify_commands run. Completion is all-or-nothing for the batch."""
+
+    def _run_batch(self, tmpdir, task_lines, tasks_per_batch, write_cmd):
+        import subprocess as sp
+        sp.run(["git", "init", "-q"], cwd=tmpdir)
+        sp.run(["git", "config", "user.email", "tests@example.com"], cwd=tmpdir)
+        sp.run(["git", "config", "user.name", "Tests"], cwd=tmpdir)
+
+        # git status --porcelain (used for suspicious/rate-limit detection) sees
+        # untracked files too, so all of this run's own scaffolding must be
+        # committed as a clean baseline *before* main() runs -- otherwise the
+        # working tree is never "clean" and every batch looks non-suspicious
+        # regardless of whether the provider command actually changed anything.
+        (Path(tmpdir) / ".gitignore").write_text("orchestrator.pid\n")
+        (Path(tmpdir) / "existing.txt").write_text("baseline\n")
+        todo = Path(tmpdir) / "Todo.md"
+        todo.write_text("".join(f"- [ ] {t}\n" for t in task_lines))
+        cfg_path = Path(tmpdir) / "config.json"
+        cfg_path.write_text(json.dumps({
+            "todo_file": str(todo),
+            "working_directory": tmpdir,
+            "require_manual_confirmation": False,
+            "tasks_per_batch": tasks_per_batch,
+            "providers": [{"name": "p", "command": write_cmd, "env": {}, "rate_limit_patterns": []}],
+        }))
+        state_path = Path(tmpdir) / "state.json"
+        state_path.write_text(json.dumps({"provider_cooldowns": {}}))
+        sp.run(["git", "add", "-A"], cwd=tmpdir)
+        sp.run(["git", "commit", "-q", "-m", "baseline"], cwd=tmpdir)
+        pid_path = Path(tmpdir) / "orchestrator.pid"
+
+        from unittest.mock import patch
+        from orchestrator import main
+        with patch.object(sys, 'argv', ['orchestrator.py', '--config', str(cfg_path), '--once']):
+            with patch('orchestrator.STATE_PATH', state_path):
+                with patch('orchestrator.time.sleep'):
+                    with patch('orchestrator.log') as mock_log:
+                        with patch('orchestrator.PID_PATH', pid_path):
+                            main()
+
+        log_output = ' '.join(str(call.args[0]) for call in mock_log.call_args_list)
+        return todo.read_text(), log_output
+
+    def test_successful_batch_marks_all_tasks_complete(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = (Path(tmpdir) / "existing.txt").as_posix()
+            write_cmd = f"python -c \"open(r'{target}', 'w').write('changed')\""
+            final_text, log_output = self._run_batch(
+                tmpdir, ["Task one", "Task two", "Task three"], tasks_per_batch=2, write_cmd=write_cmd,
+            )
+            self.assertIn("- [x] Task one", final_text)
+            self.assertIn("- [x] Task two", final_text)
+            # third task is outside the batch (tasks_per_batch=2) -- left untouched
+            self.assertIn("- [ ] Task three", final_text)
+            self.assertIn("Starting batch of 2 tasks", log_output)
+
+    def test_failed_batch_marks_none_complete(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Makes no changes -> suspicious -> whole batch treated as failed,
+            # not partially accepted.
+            no_change_cmd = "python -c \"print('hello')\""
+            final_text, log_output = self._run_batch(
+                tmpdir, ["Task one", "Task two"], tasks_per_batch=2, write_cmd=no_change_cmd,
+            )
+            self.assertIn("- [ ] Task one", final_text)
+            self.assertIn("- [ ] Task two", final_text)
+            self.assertIn("SUSPICIOUS", log_output)
+
+    def test_batch_never_exceeds_configured_size(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = (Path(tmpdir) / "existing.txt").as_posix()
+            write_cmd = f"python -c \"open(r'{target}', 'w').write('changed')\""
+            tasks = [f"Task {i}" for i in range(7)]
+            # 7 pending tasks, but tasks_per_batch=5 (the max valid value) --
+            # only the first 5 should be picked up in this one --once run.
+            final_text, _ = self._run_batch(tmpdir, tasks, tasks_per_batch=5, write_cmd=write_cmd)
+            for i in range(5):
+                self.assertIn(f"- [x] Task {i}", final_text)
+            for i in range(5, 7):
+                self.assertIn(f"- [ ] Task {i}", final_text)
+
+    def test_default_batch_size_is_one(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            import subprocess as sp
+            sp.run(["git", "init", "-q"], cwd=tmpdir)
+            sp.run(["git", "config", "user.email", "tests@example.com"], cwd=tmpdir)
+            sp.run(["git", "config", "user.name", "Tests"], cwd=tmpdir)
+            (Path(tmpdir) / "existing.txt").write_text("baseline\n")
+            sp.run(["git", "add", "-A"], cwd=tmpdir)
+            sp.run(["git", "commit", "-q", "-m", "baseline"], cwd=tmpdir)
+
+            todo = Path(tmpdir) / "Todo.md"
+            todo.write_text("- [ ] Task one\n- [ ] Task two\n")
+            cfg_path = Path(tmpdir) / "config.json"
+            target = (Path(tmpdir) / "existing.txt").as_posix()
+            write_cmd = f"python -c \"open(r'{target}', 'w').write('changed')\""
+            cfg_path.write_text(json.dumps({
+                "todo_file": str(todo),
+                "working_directory": tmpdir,
+                "require_manual_confirmation": False,
+                # tasks_per_batch omitted entirely -- must default to 1
+                "providers": [{"name": "p", "command": write_cmd, "env": {}, "rate_limit_patterns": []}],
+            }))
+            state_path = Path(tmpdir) / "state.json"
+            state_path.write_text(json.dumps({"provider_cooldowns": {}}))
+            pid_path = Path(tmpdir) / "orchestrator.pid"
+
+            from unittest.mock import patch
+            from orchestrator import main
+            with patch.object(sys, 'argv', ['orchestrator.py', '--config', str(cfg_path), '--once']):
+                with patch('orchestrator.STATE_PATH', state_path):
+                    with patch('orchestrator.time.sleep'):
+                        with patch('orchestrator.PID_PATH', pid_path):
+                            main()
+
+            final_text = todo.read_text()
+            self.assertIn("- [x] Task one", final_text)
+            self.assertIn("- [ ] Task two", final_text)
+
+    def test_validate_config_rejects_out_of_range_tasks_per_batch(self):
+        with self.assertRaises(SystemExit):
+            validate_config({
+                "todo_file": "Todo.md",
+                "tasks_per_batch": 6,
+                "providers": [{"name": "p", "command": "echo"}],
+            })
+        with self.assertRaises(SystemExit):
+            validate_config({
+                "todo_file": "Todo.md",
+                "tasks_per_batch": 0,
+                "providers": [{"name": "p", "command": "echo"}],
+            })
+
+    def test_validate_config_accepts_in_range_tasks_per_batch(self):
+        try:
+            validate_config({
+                "todo_file": "Todo.md",
+                "tasks_per_batch": 5,
+                "providers": [{"name": "p", "command": "echo"}],
+            })
+        except SystemExit:
+            self.fail("validate_config raised SystemExit for a valid tasks_per_batch")
+
+
 class TestVerifyLiveOutput(unittest.TestCase):
     def test_verify_prints_to_stderr(self):
         import io

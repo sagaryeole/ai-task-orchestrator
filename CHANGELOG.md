@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`tasks_per_batch` config field** (default `1`, hard-capped at `5`) — bundles up to N pending tasks into a single agent invocation and a single `verify_commands` run, amortizing per-task build/test overhead across them. Completion is all-or-nothing for the whole batch (same failure/retry/defer/skip path as a single failed task today); there's no reliable way to attribute a mixed batch outcome to individual tasks since they share one exit code and one git-diff check.
+
+### Fixed
+- **Nonexistent `--no-interactive` flag** in every Claude Code CLI reference (`examples/claude.json`, README, all docs, the built-in interactive-launcher lint) — the real CLI has no such flag; corrected to `-p --permission-mode bypassPermissions`.
+
 ### Changed
 - **BREAKING: default config filename renamed** from `config.json` to `task-orchestrator.config.json` — `config.json` is a generic name likely to collide with another tool's config in the same repo, and its genericness made it easy to gitignore-miss. Existing users must rename their file (`mv config.json task-orchestrator.config.json`) or pass `--config config.json` explicitly; there is no automatic fallback.
 - `task-orchestrator init` now gitignores the config file it scaffolds by default — provider `env` blocks commonly hold API keys (directly or via `$VAR` interpolation), so the config should not be committed by default.

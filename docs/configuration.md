@@ -16,6 +16,7 @@ Configuration is stored in `task-orchestrator.config.json` (or any path passed v
 | `subprocess_timeout` | int \| null | `null` | Wall-clock timeout per task (null = no limit) |
 | `stall_timeout_seconds` | int | `600` | Kill task if no CPU/file activity for this long |
 | `max_retries_per_provider` | int | `1` | Retry attempts on non-rate-limit failures |
+| `tasks_per_batch` | int | `1` | Bundle up to N pending tasks (max `5`) into one agent invocation and one `verify_commands` run. All-or-nothing completion for the batch. |
 | `require_manual_confirmation` | bool | `false` | Prompt for approval after each task |
 | `continue_on_failure` | bool | `true` | If false, stop on first failed task |
 | `on_failure` | string | `"skip"` | Behavior on failure: `skip`, `defer`, or `stop` |

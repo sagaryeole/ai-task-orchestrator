@@ -42,6 +42,13 @@
       "default": 1,
       "description": "Retry attempts per provider on non-rate-limit failures"
     },
+    "tasks_per_batch": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 5,
+      "default": 1,
+      "description": "Bundle up to this many pending tasks into a single agent invocation and a single verify_commands run, amortizing build/test overhead across them. Completion is all-or-nothing for the whole batch."
+    },
     "require_manual_confirmation": {
       "type": "boolean",
       "default": false,

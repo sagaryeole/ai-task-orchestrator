@@ -56,6 +56,9 @@ LOG_MAX_BYTES = 10 * 1024 * 1024  # 10 MB per file
 LOG_BACKUP_COUNT = 5
 TASK_REGEX = r"- \[ \] (.+)"
 TAG_REGEX = r"(\[\w+\])"
+MAX_TASKS_PER_BATCH = 5  # hard cap -- one agent invocation covering too many
+# tasks at once makes the all-or-nothing verify/commit gate too coarse (a
+# single bad task in a big batch discards everything else alongside it).
 STALL_CPU_THRESHOLD = 12.0  # %cpu below this counts as "idle" for stall detection.
 # Calibrated from real observed data: a genuinely stalled process read 0-4%
 # CPU (event-loop/GC noise, not real work) and kept resetting the stall timer
@@ -180,6 +183,11 @@ def validate_config(config):
                     errors.append(f"Provider at index {i} missing or empty 'name'.")
                 if "command" not in p or not p["command"]:
                     errors.append(f"Provider at index {i} missing or empty 'command'.")
+
+    if "tasks_per_batch" in config:
+        tpb = config["tasks_per_batch"]
+        if not isinstance(tpb, int) or isinstance(tpb, bool) or not (1 <= tpb <= MAX_TASKS_PER_BATCH):
+            errors.append(f"'tasks_per_batch' must be an integer between 1 and {MAX_TASKS_PER_BATCH} (got {tpb!r}).")
 
     if errors:
         sys.exit("Config validation failed:\n" + "\n".join(f"  - {e}" for e in errors))
@@ -1700,6 +1708,7 @@ _INIT_DEFAULT_CONFIG = {
     "subprocess_timeout": 180,
     "stall_timeout_seconds": 600,
     "max_retries_per_provider": 3,
+    "tasks_per_batch": 1,
     "require_manual_confirmation": True,
     "continue_on_failure": True,
     "auto_commit": False,
@@ -1718,12 +1727,13 @@ _INIT_DEFAULT_CONFIG = {
 _INIT_DEFAULT_TODO = "# Todo\n\n## Backlog\n\n- [ ] Example task: replace this with your first real task\n"
 
 _INIT_DEFAULT_PROMPT = (
-    "Complete ONLY this task:\n{{TASK}}\n\n"
+    "Complete ONLY the task(s) below (there may be one, or a numbered batch of a few):\n{{TASK}}\n\n"
     "Rules:\n"
+    "- If more than one task is listed, complete all of them.\n"
     "- Modify code as needed.\n"
     "- Run tests if applicable.\n"
     "- Fix any errors you introduce.\n"
-    "- When finished, stop and exit. Do not start another task.\n"
+    "- When finished, stop and exit. Do not start another task beyond what's listed above.\n"
 )
 
 _INIT_GITIGNORE_LINES = [
@@ -2174,12 +2184,28 @@ def main():
                     time.sleep(delay)
                     continue  # re-read Todo.md for next iteration
 
-            task = tasks[0]
+            # tasks_per_batch (default 1, hard-capped at MAX_TASKS_PER_BATCH) bundles
+            # up to N pending tasks into a single agent invocation and a single
+            # verify_commands run, amortizing per-task build/test overhead across
+            # them. Completion is all-or-nothing: the batch shares one exit code,
+            # one git-diff check, and one verify_commands result, so there's no
+            # reliable way to attribute a mixed outcome to individual tasks --
+            # either every task in the batch is marked complete, or none are (same
+            # retry/defer/skip path a single failed task already takes).
+            batch_size = min(max(1, int(config.get("tasks_per_batch", 1))), MAX_TASKS_PER_BATCH)
+            batch_tasks = tasks[:batch_size]
+            if len(batch_tasks) == 1:
+                task = batch_tasks[0]
+            else:
+                task = "\n".join(f"{i + 1}. {t}" for i, t in enumerate(batch_tasks))
             _set_control_state("current_task", task)
             _set_control_state("skip_current_task", False)
             task_start_time = time.time()
             log("=" * 60, color="dim")
-            log(f"Starting task: {task}", color="bold_green")
+            if len(batch_tasks) > 1:
+                log(f"Starting batch of {len(batch_tasks)} tasks:\n{task}", color="bold_green")
+            else:
+                log(f"Starting task: {task}", color="bold_green")
             print_progress(todo_path, state, skip_sections=args.skip_section)
             log_json("task_start", task=task, provider_idx=provider_idx)
             update_dashboard_state(
@@ -2218,7 +2244,7 @@ def main():
                 for attempt in range(1, max_retries_per_provider + 1):
                     if _get_control_state("skip_current_task", False):
                         log("Current task was skipped by interactive command; leaving it unchecked.", color="yellow")
-                        skipped_tasks.add(task)
+                        skipped_tasks.update(batch_tasks)
                         task_done = True
                         _set_control_state("skip_current_task", False)
                         break
@@ -2305,7 +2331,7 @@ def main():
                             log(f"Providers: {print_provider_status(providers, state)}", color="blue")
                             break
                         elif answer == "skip-task":
-                            skipped_tasks.add(task)
+                            skipped_tasks.update(batch_tasks)
                             log(f"Task left unchecked and skipped for this cycle: {task}", color="yellow")
                             task_done = True
                             break
@@ -2324,11 +2350,15 @@ def main():
 
                 if attempt_success:
                     provider.reset_rate_limit_count(state)
-                    mark_complete(todo_path, task)
-                    skipped_tasks.discard(task)
-                    duration = time.time() - task_start_time
+                    for t in batch_tasks:
+                        mark_complete(todo_path, t)
+                    skipped_tasks.difference_update(batch_tasks)
+                    # duration is for the whole batch -- split evenly so the rolling
+                    # window stays one sample per completed task, keeping ETA/avg/
+                    # longest/shortest meaningful regardless of batch size.
+                    duration = (time.time() - task_start_time) / len(batch_tasks)
                     durations = state.get("completed_task_durations", [])
-                    durations.append(duration)
+                    durations.extend([duration] * len(batch_tasks))
                     state["completed_task_durations"] = durations[-200:]
                     save_state(state)
                     git_commit(config, task)
@@ -2382,10 +2412,11 @@ def main():
                         log("Stopping (on_failure=stop).", color="bold_red")
                         return
                     elif on_failure == "defer":
-                        defer_task(todo_path, task)
+                        for t in batch_tasks:
+                            defer_task(todo_path, t)
                         log(f"Task deferred to end of file: {task}", color="yellow")
                     else:  # "skip" (default)
-                        skipped_tasks.add(task)
+                        skipped_tasks.update(batch_tasks)
                     task_done = True  # move on to next task in Todo.md
                 else:
                     # Provider just got marked exhausted -> loop again to pick the next one immediately
