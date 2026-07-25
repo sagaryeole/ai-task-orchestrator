@@ -116,7 +116,7 @@ Your code, your keys, your machine. Nothing leaves without you explicitly config
   - `logs/orchestrator.log` — auto-created; append-only human-readable run log.
   - `logs/orchestrator.jsonl` — auto-created when `--json-logs` (or `"json_logs": true` in `task-orchestrator.config.json`) is set; one JSON object per line, for downstream parsing/dashboards.
 - **Providers:** each is a plain CLI launch — a command string plus an environment variable overlay (API keys, base URLs) plus a list of substrings/regex fragments that indicate a rate limit was hit. This makes a "provider" nothing more than "however you'd normally invoke your agent CLI with a specific model/backend," so it works with Anthropic's API, OpenRouter, Nvidia NIM's OpenAI-compatible endpoint, a local LM Studio server, or anything else reachable via a CLI flag or env var.
-- **Process model:** each task attempt is a synchronous subprocess call. By default the prompt is piped to the agent CLI's stdin; if a provider's `command` contains a literal `{{TASK}}` token instead, the full prompt is substituted there as a single argv element and stdin is left empty (needed for CLIs like GitHub Copilot CLI, whose `-p <text>` takes the prompt as an argument, not stdin). Combined stdout/stderr is captured for rate-limit detection and printed live to the terminal.
+- **Process model:** each task attempt is a synchronous subprocess call. By default the prompt is piped to the agent CLI's stdin; if a provider's `command` contains a literal `{{TASK}}` token instead, the full prompt is substituted there as a single argv element and stdin is left empty (needed for CLIs like GitHub Copilot CLI, whose `-p <text>` takes the prompt as an argument, not stdin). Combined stdout/stderr is captured for rate-limit detection and written to `logs/orchestrator.log` (not the terminal) — an agent's full transcript can be thousands of lines, so it stays out of the way of the short per-task status lines the terminal shows. `verify_commands` failure output and provider `stats_command` output are handled the same way: a one-line pointer on the terminal, the full dump only in the log file.
 - **State machine per task:** pick provider → run → check for rate-limit pattern → (if limited) cooldown that provider and rotate to next → (if not limited) verify → confirm/auto-accept → mark complete or retry/give up → sleep `delay_seconds` → next task.
 
 ## Solution / How It Works
@@ -171,6 +171,7 @@ If every provider is on cooldown at once, the orchestrator sleeps until the earl
 | `continue_on_failure` | If `false`, the orchestrator stops entirely on the first task that can't be completed |
 | `auto_commit` | If `true`, runs `git add -A && git commit` after each completed task |
 | `verify_commands` | Shell commands (e.g. `pytest`, `npm test`) that must all exit 0 for a task to count as verified |
+| `verify_timeout_seconds` | Wall-clock timeout per `verify_commands` entry (default `1800`, `null` = no limit). Unlike the agent's own subprocess, a hanging build/test command isn't covered by stall detection — this is its only backstop. |
 | `providers[]` | List of provider entries — see below |
 
 Each entry in `providers`:

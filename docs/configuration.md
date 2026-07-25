@@ -22,6 +22,7 @@ Configuration is stored in `task-orchestrator.config.json` (or any path passed v
 | `on_failure` | string | `"skip"` | Behavior on failure: `skip`, `defer`, or `stop` |
 | `auto_commit` | bool | `true` | Git commit after each completed task |
 | `verify_commands` | string[] | `[]` | Commands that must exit 0 for task verification |
+| `verify_timeout_seconds` | int \| null | `1800` | Wall-clock timeout per verify command (null = no limit) — the only backstop against a hanging build/test, since stall detection only covers the agent's own subprocess |
 | `json_logs` | bool | `false` | Enable structured JSON logging |
 | `dashboard_port` | int \| null | `null` | Local dashboard HTTP port (null = disabled) |
 

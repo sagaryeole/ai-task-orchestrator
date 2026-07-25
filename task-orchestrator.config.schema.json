@@ -76,6 +76,11 @@
       "default": [],
       "description": "Shell commands that must all exit 0 for a task to be verified"
     },
+    "verify_timeout_seconds": {
+      "type": ["integer", "null"],
+      "default": 1800,
+      "description": "Wall-clock timeout for each verify_commands entry (null = no limit). A hanging build/test command has no other backstop -- it runs after the agent's own subprocess has already exited, so stall detection doesn't cover it."
+    },
     "subprocess_timeout_overrides": {
       "type": "object",
       "additionalProperties": { "type": "integer" },

@@ -419,6 +419,20 @@ def log(msg, color=None):
             f.write(line + "\n")  # plain text on disk -- no escape codes in the log file
 
 
+def log_file_only(msg):
+    """Same as log(), but never printed to the terminal -- for high-volume
+    content (a full agent transcript, a full verify_commands failure dump)
+    that belongs in logs/orchestrator.log, not scrolling past every short
+    status line a human watching the terminal actually wants to see."""
+    with _log_lock:
+        _rotate_log_file(LOG_DIR / "orchestrator.log")
+        LOG_DIR.mkdir(exist_ok=True)
+        ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        line = f"[{ts}] {_mask_secrets(msg)}"
+        with open(LOG_DIR / "orchestrator.log", "a") as f:
+            f.write(line + "\n")
+
+
 def _applescript_escape(text):
     """Escape a string for safe interpolation into a double-quoted AppleScript
     literal. Without this, a title/message containing a double quote (e.g. a
@@ -1236,7 +1250,10 @@ class Provider:
         stdout = result.get("stdout", "")
         stderr = result.get("stderr", "")
         output = (stdout or "") + "\n" + (stderr or "")
-        print(_mask_secrets(output))  # still show live output in the terminal
+        # The agent's full transcript (tool calls, file reads, reasoning) can be
+        # thousands of lines -- that belongs in the log file, not scrolling past
+        # the short per-task status lines a human watching the terminal wants.
+        log_file_only(f"[{self.name}] full output:\n{output}")
 
         looked_rate_limited = any(p in output.lower() for p in self.rate_limit_patterns)
         return process.returncode, output, looked_rate_limited
@@ -1559,17 +1576,38 @@ def run_verification(config):
     checks = config.get("verify_commands", [])
     if not checks:
         return True
+    # None means unbounded, matching subprocess_timeout's convention elsewhere --
+    # but unlike subprocess_timeout, there's no stall-detection backstop here
+    # (verify_commands runs after the agent's own subprocess has already
+    # exited), so a hanging build/test command would otherwise block the
+    # orchestrator forever with no way to recover. 1800s (30 min) is a
+    # generous default for a real build+test pass; override per-project via
+    # 'verify_timeout_seconds' if that's genuinely not enough.
+    timeout = config.get("verify_timeout_seconds", 1800)
     for cmd in checks:
         resolved_cmd = _resolve_shell_python(cmd)
         log(f"Verifying: {cmd}", color="cyan")
-        result = subprocess.run(
-            resolved_cmd, shell=True, cwd=config.get("working_directory", "."),
-            capture_output=True, text=True, errors="replace",
-        )
+        try:
+            result = subprocess.run(
+                resolved_cmd, shell=True, cwd=config.get("working_directory", "."),
+                capture_output=True, text=True, errors="replace", timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as e:
+            failure_msg = (
+                f"Verification TIMED OUT after {timeout}s: {cmd}\n"
+                f"{e.stdout or ''}\n{e.stderr or ''}"
+            )
+            # Full output (a build/test log can be huge) goes to the log file
+            # only; the terminal gets a one-line pointer, not the dump.
+            log_file_only(failure_msg)
+            log(f"Verification TIMED OUT after {timeout}s: {cmd} (see logs/orchestrator.log)", color="bold_red")
+            print(f"Verification TIMED OUT after {timeout}s: {cmd}", file=sys.stderr)
+            return False
         if result.returncode != 0:
             failure_msg = f"Verification FAILED: {cmd}\n{result.stdout}\n{result.stderr}"
-            log(failure_msg, color="bold_red")
-            print(failure_msg, file=sys.stderr)
+            log_file_only(failure_msg)
+            log(f"Verification FAILED: {cmd} (see logs/orchestrator.log)", color="bold_red")
+            print(f"Verification FAILED: {cmd}", file=sys.stderr)
             return False
     return True
 
@@ -1624,9 +1662,9 @@ def run_provider_stats(provider, working_directory: str, task: str):
 
     log(f"[{provider.name}] stats output (exit {result.returncode}):", color="dim")
     if stdout:
-        log(stdout)
+        log_file_only(stdout)
     if stderr:
-        log(stderr, color="yellow")
+        log_file_only(stderr)
 
     stats_payload = {"provider": provider.name, "task": task, "exit_code": result.returncode}
     if stdout:

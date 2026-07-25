@@ -25,6 +25,7 @@ from orchestrator import (
     git_run,
     validate_git_working_tree,
     run_verification,
+    log_file_only,
     lint_config,
     lint_todo,
     get_task_timeout,
@@ -730,6 +731,48 @@ class TestVerifyLiveOutput(unittest.TestCase):
                 stderr_output = fake_err.getvalue()
                 self.assertIn("Verification FAILED", stderr_output)
                 self.assertIn("sys.exit(1)", stderr_output)
+
+    def test_verify_failure_full_output_goes_to_file_only_not_terminal(self):
+        """A failing verify command's full stdout/stderr (a build/test log can
+        be huge) must go to logs/orchestrator.log only, not scroll past the
+        short per-task status lines in the terminal."""
+        from unittest.mock import patch
+        # The marker is built at runtime (not a single literal substring in the
+        # command source) so this test can tell "output captured from running
+        # the command" apart from "the log(f'Verifying: {cmd}') line, which
+        # legitimately contains the command's own source text".
+        fail_cmd = "python -c \"import sys; print('verbose ' + 'buildlog xyz'); sys.exit(1)\""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch('orchestrator.log_file_only') as mock_file_only:
+                with patch('orchestrator.log') as mock_log:
+                    result = run_verification({"verify_commands": [fail_cmd], "working_directory": tmpdir})
+            self.assertFalse(result)
+            file_only_calls = [str(c.args[0]) for c in mock_file_only.call_args_list]
+            self.assertTrue(any("verbose buildlog xyz" in m for m in file_only_calls))
+            terminal_calls = [str(c.args[0]) for c in mock_log.call_args_list]
+            self.assertFalse(any("verbose buildlog xyz" in m for m in terminal_calls))
+
+    def test_verify_success_does_not_write_to_file_only(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch('orchestrator.log_file_only') as mock_file_only:
+                with patch('orchestrator.log'):
+                    result = run_verification({"verify_commands": ["python -c \"pass\""], "working_directory": tmpdir})
+            self.assertTrue(result)
+            mock_file_only.assert_not_called()
+
+    def test_verify_timeout_treated_as_failure(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch('orchestrator.log') as mock_log:
+                result = run_verification({
+                    "verify_commands": ["python -c \"import time; time.sleep(5)\""],
+                    "working_directory": tmpdir,
+                    "verify_timeout_seconds": 0.1,
+                })
+            self.assertFalse(result)
+            log_msgs = [str(c.args[0]) for c in mock_log.call_args_list]
+            self.assertTrue(any("TIMED OUT" in m for m in log_msgs))
 
 
 class TestSkipTask(unittest.TestCase):
