@@ -62,7 +62,7 @@ task-orchestrator --once
 | Provider CLI | Command Template | Prompt Mode | Tested | Notes |
 |---|---|---|---|---|
 | GitHub Copilot CLI | `copilot --allow-all-tools --no-ask-user -s -p {{TASK}}` | Arg (`{{TASK}}`) | Yes | `copilot login` required first |
-| Claude Code | `claude --no-interactive --print` | stdin | Yes | Set `ANTHROPIC_API_KEY` |
+| Claude Code | `claude -p --permission-mode bypassPermissions` | stdin | Yes | Set `ANTHROPIC_API_KEY` in `env` for API billing, or leave `env` empty to use an already-logged-in subscription session |
 | Kilo Code | `kilo run --auto` | stdin | Yes | Use `--auto` for unattended runs |
 | Codex CLI | `codex --quiet` | stdin | Partial | May require additional no-interactive flags |
 | Ollama (local) | `ollama run codellama` | stdin | Partial | Good local fallback, no remote rate limits |
@@ -321,7 +321,7 @@ Prerequisites:
 | Provider CLI | Command Template | Stdin/Arg | Tested | Notes |
 |---|---|---|---|---|
 | GitHub Copilot CLI | `copilot --allow-all-tools --no-ask-user -s -p {{TASK}}` | Arg | ✅ | Requires `copilot login` first |
-| Claude Code | `claude --no-interactive --print` | Stdin | ✅ | Set `ANTHROPIC_API_KEY` in env |
+| Claude Code | `claude -p --permission-mode bypassPermissions` | Stdin | ✅ | Set `ANTHROPIC_API_KEY` in `env` for API billing, or leave `env` empty for an already-logged-in subscription session |
 | Kilo Code | `kilo run --auto` | Stdin | ✅ | Interactive by default; `--auto` required |
 | Codex CLI | `codex --quiet` | Stdin | Untested | May need `--no-interactive` |
 | Aider | `aider --yes --message {{TASK}}` | Arg | Untested | Auto-confirms with `--yes` |

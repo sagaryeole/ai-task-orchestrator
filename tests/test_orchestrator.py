@@ -652,11 +652,11 @@ class TestLintConfig(unittest.TestCase):
             "providers": [{"name": "claude-p", "command": "claude", "env": {}, "rate_limit_patterns": []}],
         })
         self.assertIn("bare/interactive", output)
-        self.assertIn("--no-interactive", output)
+        self.assertIn("--print", output)
 
     def test_no_warn_on_claude_with_headless_flag(self):
         output = self._run_lint({
-            "providers": [{"name": "claude-p", "command": "claude --no-interactive", "env": {}, "rate_limit_patterns": []}],
+            "providers": [{"name": "claude-p", "command": "claude --print", "env": {}, "rate_limit_patterns": []}],
         })
         self.assertNotIn("bare/interactive", output)
 

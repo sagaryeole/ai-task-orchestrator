@@ -1,5 +1,5 @@
 {
-  "_comment": "Claude Code CLI provider — requires claude CLI installed and authenticated",
+  "_comment": "Claude Code CLI provider — requires the claude CLI installed and authenticated. Two auth modes: (1) API key billing — keep the env block below with $ANTHROPIC_API_KEY interpolation. (2) Claude subscription (Pro/Max) logged in via `claude login` in your terminal — delete the env block entirely (set it to {}); leaving a literal/unresolved ANTHROPIC_API_KEY in env overrides the CLI's own stored OAuth session and breaks auth.",
   "todo_file": "Todo.md",
   "working_directory": ".",
   "prompt_template": "prompts/task_prompt.txt",
@@ -14,9 +14,9 @@
     {
       "name": "claude",
       "enabled": true,
-      "command": "claude --no-interactive --print",
+      "command": "claude -p --permission-mode bypassPermissions",
       "env": {"ANTHROPIC_API_KEY": "$ANTHROPIC_API_KEY"},
-      "rate_limit_patterns": ["rate limit", "429", "overloaded", "capacity"],
+      "rate_limit_patterns": ["rate limit", "429", "overloaded", "capacity", "usage limit"],
       "cooldown_seconds": 600
     }
   ]

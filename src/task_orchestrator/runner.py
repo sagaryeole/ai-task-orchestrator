@@ -187,8 +187,9 @@ def validate_config(config):
 
 _INTERACTIVE_LAUNCHERS = {
     "claude": {
-        "headless_flags": ["--no-interactive", "--print", "-p"],
-        "message": "Claude Code is interactive by default; use --no-interactive or --print for unattended runs.",
+        "headless_flags": ["--print", "-p"],
+        "message": "Claude Code is interactive by default; use --print/-p for unattended runs "
+                   "(and --permission-mode bypassPermissions so it doesn't hang waiting for tool-use approval).",
     },
     "codex": {
         "headless_flags": ["--quiet", "--no-interactive"],
