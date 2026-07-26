@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`tasks_per_batch` config field** (default `1`, hard-capped at `5`) — bundles up to N pending tasks into a single agent invocation and a single `verify_commands` run, amortizing per-task build/test overhead across them. Completion is all-or-nothing for the whole batch (same failure/retry/defer/skip path as a single failed task today); there's no reliable way to attribute a mixed batch outcome to individual tasks since they share one exit code and one git-diff check.
+- **`verify_timeout_seconds` config field** (default `1800`, `null` = no limit) — `verify_commands` previously had no timeout at all; a hanging build/test command blocked the orchestrator forever with no recovery, since it runs after the agent's own subprocess has already exited and isn't covered by stall detection.
+- **Verify failures are now fed back into retry prompts.** Previously a `verify_commands` failure re-sent the exact same prompt on the next attempt, so the agent had no idea what broke or that it broke at all — every retry just repeated the first attempt against unchanged code, burning agent invocations on pre-existing/unrelated failures it couldn't see. `run_verification()` now returns `(bool, failure_output)`; each retry (same provider or after rotating to the next one) appends the prior failure's command + stdout/stderr to the task prompt via the new `build_retry_prompt()`, truncated to `VERIFY_FEEDBACK_MAX_CHARS` (4000 chars) to bound prompt growth. Cleared once verification passes.
+
+### Fixed
+- **Nonexistent `--no-interactive` flag** in every Claude Code CLI reference (`examples/claude.json`, README, all docs, the built-in interactive-launcher lint) — the real CLI has no such flag; corrected to `-p --permission-mode bypassPermissions`.
+- **Noisy terminal output** — an agent's full transcript, a failing `verify_commands`' full stdout/stderr, and a provider's `stats_command` output were all printed live to the terminal (thousands of lines for a real agentic run), on top of the short per-task status lines. All three now go to `logs/orchestrator.log` only, with a one-line pointer left on the terminal. New `log_file_only()` helper backs this.
+
 ### Changed
 - **BREAKING: default config filename renamed** from `config.json` to `task-orchestrator.config.json` — `config.json` is a generic name likely to collide with another tool's config in the same repo, and its genericness made it easy to gitignore-miss. Existing users must rename their file (`mv config.json task-orchestrator.config.json`) or pass `--config config.json` explicitly; there is no automatic fallback.
 - `task-orchestrator init` now gitignores the config file it scaffolds by default — provider `env` blocks commonly hold API keys (directly or via `$VAR` interpolation), so the config should not be committed by default.

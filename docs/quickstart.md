@@ -56,7 +56,7 @@ Edit `task-orchestrator.config.json` and set your agent CLI command:
     {
       "providers": [{
         "name": "claude",
-        "command": "claude --no-interactive --print",
+        "command": "claude -p --permission-mode bypassPermissions",
         "env": {"ANTHROPIC_API_KEY": "$ANTHROPIC_API_KEY"},
         "rate_limit_patterns": ["rate limit", "429", "overloaded"],
         "cooldown_seconds": 600

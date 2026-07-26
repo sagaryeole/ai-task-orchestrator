@@ -25,6 +25,8 @@ from orchestrator import (
     git_run,
     validate_git_working_tree,
     run_verification,
+    build_retry_prompt,
+    log_file_only,
     lint_config,
     lint_todo,
     get_task_timeout,
@@ -572,6 +574,152 @@ class TestRateLimitFalsePositive(unittest.TestCase):
             self.assertIn("- [ ] Task one", final_text)
 
 
+class TestTasksPerBatch(unittest.TestCase):
+    """tasks_per_batch bundles up to N pending tasks into one agent invocation
+    and one verify_commands run. Completion is all-or-nothing for the batch."""
+
+    def _run_batch(self, tmpdir, task_lines, tasks_per_batch, write_cmd):
+        import subprocess as sp
+        sp.run(["git", "init", "-q"], cwd=tmpdir)
+        sp.run(["git", "config", "user.email", "tests@example.com"], cwd=tmpdir)
+        sp.run(["git", "config", "user.name", "Tests"], cwd=tmpdir)
+
+        # git status --porcelain (used for suspicious/rate-limit detection) sees
+        # untracked files too, so all of this run's own scaffolding must be
+        # committed as a clean baseline *before* main() runs -- otherwise the
+        # working tree is never "clean" and every batch looks non-suspicious
+        # regardless of whether the provider command actually changed anything.
+        (Path(tmpdir) / ".gitignore").write_text("orchestrator.pid\n")
+        (Path(tmpdir) / "existing.txt").write_text("baseline\n")
+        todo = Path(tmpdir) / "Todo.md"
+        todo.write_text("".join(f"- [ ] {t}\n" for t in task_lines))
+        cfg_path = Path(tmpdir) / "config.json"
+        cfg_path.write_text(json.dumps({
+            "todo_file": str(todo),
+            "working_directory": tmpdir,
+            "require_manual_confirmation": False,
+            "tasks_per_batch": tasks_per_batch,
+            "providers": [{"name": "p", "command": write_cmd, "env": {}, "rate_limit_patterns": []}],
+        }))
+        state_path = Path(tmpdir) / "state.json"
+        state_path.write_text(json.dumps({"provider_cooldowns": {}}))
+        sp.run(["git", "add", "-A"], cwd=tmpdir)
+        sp.run(["git", "commit", "-q", "-m", "baseline"], cwd=tmpdir)
+        pid_path = Path(tmpdir) / "orchestrator.pid"
+
+        from unittest.mock import patch
+        from orchestrator import main
+        with patch.object(sys, 'argv', ['orchestrator.py', '--config', str(cfg_path), '--once']):
+            with patch('orchestrator.STATE_PATH', state_path):
+                with patch('orchestrator.time.sleep'):
+                    with patch('orchestrator.log') as mock_log:
+                        with patch('orchestrator.PID_PATH', pid_path):
+                            main()
+
+        log_output = ' '.join(str(call.args[0]) for call in mock_log.call_args_list)
+        return todo.read_text(), log_output
+
+    def test_successful_batch_marks_all_tasks_complete(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = (Path(tmpdir) / "existing.txt").as_posix()
+            write_cmd = f"python -c \"open(r'{target}', 'w').write('changed')\""
+            final_text, log_output = self._run_batch(
+                tmpdir, ["Task one", "Task two", "Task three"], tasks_per_batch=2, write_cmd=write_cmd,
+            )
+            self.assertIn("- [x] Task one", final_text)
+            self.assertIn("- [x] Task two", final_text)
+            # third task is outside the batch (tasks_per_batch=2) -- left untouched
+            self.assertIn("- [ ] Task three", final_text)
+            self.assertIn("Starting batch of 2 tasks", log_output)
+
+    def test_failed_batch_marks_none_complete(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Makes no changes -> suspicious -> whole batch treated as failed,
+            # not partially accepted.
+            no_change_cmd = "python -c \"print('hello')\""
+            final_text, log_output = self._run_batch(
+                tmpdir, ["Task one", "Task two"], tasks_per_batch=2, write_cmd=no_change_cmd,
+            )
+            self.assertIn("- [ ] Task one", final_text)
+            self.assertIn("- [ ] Task two", final_text)
+            self.assertIn("SUSPICIOUS", log_output)
+
+    def test_batch_never_exceeds_configured_size(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = (Path(tmpdir) / "existing.txt").as_posix()
+            write_cmd = f"python -c \"open(r'{target}', 'w').write('changed')\""
+            tasks = [f"Task {i}" for i in range(7)]
+            # 7 pending tasks, but tasks_per_batch=5 (the max valid value) --
+            # only the first 5 should be picked up in this one --once run.
+            final_text, _ = self._run_batch(tmpdir, tasks, tasks_per_batch=5, write_cmd=write_cmd)
+            for i in range(5):
+                self.assertIn(f"- [x] Task {i}", final_text)
+            for i in range(5, 7):
+                self.assertIn(f"- [ ] Task {i}", final_text)
+
+    def test_default_batch_size_is_one(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            import subprocess as sp
+            sp.run(["git", "init", "-q"], cwd=tmpdir)
+            sp.run(["git", "config", "user.email", "tests@example.com"], cwd=tmpdir)
+            sp.run(["git", "config", "user.name", "Tests"], cwd=tmpdir)
+            (Path(tmpdir) / "existing.txt").write_text("baseline\n")
+            sp.run(["git", "add", "-A"], cwd=tmpdir)
+            sp.run(["git", "commit", "-q", "-m", "baseline"], cwd=tmpdir)
+
+            todo = Path(tmpdir) / "Todo.md"
+            todo.write_text("- [ ] Task one\n- [ ] Task two\n")
+            cfg_path = Path(tmpdir) / "config.json"
+            target = (Path(tmpdir) / "existing.txt").as_posix()
+            write_cmd = f"python -c \"open(r'{target}', 'w').write('changed')\""
+            cfg_path.write_text(json.dumps({
+                "todo_file": str(todo),
+                "working_directory": tmpdir,
+                "require_manual_confirmation": False,
+                # tasks_per_batch omitted entirely -- must default to 1
+                "providers": [{"name": "p", "command": write_cmd, "env": {}, "rate_limit_patterns": []}],
+            }))
+            state_path = Path(tmpdir) / "state.json"
+            state_path.write_text(json.dumps({"provider_cooldowns": {}}))
+            pid_path = Path(tmpdir) / "orchestrator.pid"
+
+            from unittest.mock import patch
+            from orchestrator import main
+            with patch.object(sys, 'argv', ['orchestrator.py', '--config', str(cfg_path), '--once']):
+                with patch('orchestrator.STATE_PATH', state_path):
+                    with patch('orchestrator.time.sleep'):
+                        with patch('orchestrator.PID_PATH', pid_path):
+                            main()
+
+            final_text = todo.read_text()
+            self.assertIn("- [x] Task one", final_text)
+            self.assertIn("- [ ] Task two", final_text)
+
+    def test_validate_config_rejects_out_of_range_tasks_per_batch(self):
+        with self.assertRaises(SystemExit):
+            validate_config({
+                "todo_file": "Todo.md",
+                "tasks_per_batch": 6,
+                "providers": [{"name": "p", "command": "echo"}],
+            })
+        with self.assertRaises(SystemExit):
+            validate_config({
+                "todo_file": "Todo.md",
+                "tasks_per_batch": 0,
+                "providers": [{"name": "p", "command": "echo"}],
+            })
+
+    def test_validate_config_accepts_in_range_tasks_per_batch(self):
+        try:
+            validate_config({
+                "todo_file": "Todo.md",
+                "tasks_per_batch": 5,
+                "providers": [{"name": "p", "command": "echo"}],
+            })
+        except SystemExit:
+            self.fail("validate_config raised SystemExit for a valid tasks_per_batch")
+
+
 class TestVerifyLiveOutput(unittest.TestCase):
     def test_verify_prints_to_stderr(self):
         import io
@@ -584,6 +732,133 @@ class TestVerifyLiveOutput(unittest.TestCase):
                 stderr_output = fake_err.getvalue()
                 self.assertIn("Verification FAILED", stderr_output)
                 self.assertIn("sys.exit(1)", stderr_output)
+
+    def test_verify_failure_full_output_goes_to_file_only_not_terminal(self):
+        """A failing verify command's full stdout/stderr (a build/test log can
+        be huge) must go to logs/orchestrator.log only, not scroll past the
+        short per-task status lines in the terminal."""
+        from unittest.mock import patch
+        # The marker is built at runtime (not a single literal substring in the
+        # command source) so this test can tell "output captured from running
+        # the command" apart from "the log(f'Verifying: {cmd}') line, which
+        # legitimately contains the command's own source text".
+        fail_cmd = "python -c \"import sys; print('verbose ' + 'buildlog xyz'); sys.exit(1)\""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch('orchestrator.log_file_only') as mock_file_only:
+                with patch('orchestrator.log') as mock_log:
+                    result, failure_output = run_verification({"verify_commands": [fail_cmd], "working_directory": tmpdir})
+            self.assertFalse(result)
+            self.assertIn("verbose buildlog xyz", failure_output)
+            file_only_calls = [str(c.args[0]) for c in mock_file_only.call_args_list]
+            self.assertTrue(any("verbose buildlog xyz" in m for m in file_only_calls))
+            terminal_calls = [str(c.args[0]) for c in mock_log.call_args_list]
+            self.assertFalse(any("verbose buildlog xyz" in m for m in terminal_calls))
+
+    def test_verify_success_does_not_write_to_file_only(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch('orchestrator.log_file_only') as mock_file_only:
+                with patch('orchestrator.log'):
+                    result, failure_output = run_verification({"verify_commands": ["python -c \"pass\""], "working_directory": tmpdir})
+            self.assertTrue(result)
+            self.assertIsNone(failure_output)
+            mock_file_only.assert_not_called()
+
+    def test_verify_timeout_treated_as_failure(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch('orchestrator.log') as mock_log:
+                result, failure_output = run_verification({
+                    "verify_commands": ["python -c \"import time; time.sleep(5)\""],
+                    "working_directory": tmpdir,
+                    "verify_timeout_seconds": 0.1,
+                })
+            self.assertFalse(result)
+            self.assertIn("TIMED OUT", failure_output)
+            log_msgs = [str(c.args[0]) for c in mock_log.call_args_list]
+            self.assertTrue(any("TIMED OUT" in m for m in log_msgs))
+
+
+class TestBuildRetryPrompt(unittest.TestCase):
+    def test_appends_verify_failure_to_prompt(self):
+        prompt = build_retry_prompt("Do the thing", "Verification FAILED: pnpm lint\nsome error")
+        self.assertIn("Do the thing", prompt)
+        self.assertIn("previous attempt", prompt.lower())
+        self.assertIn("Verification FAILED: pnpm lint", prompt)
+
+    def test_truncates_very_long_verify_failure(self):
+        from orchestrator import VERIFY_FEEDBACK_MAX_CHARS
+        huge = "x" * (VERIFY_FEEDBACK_MAX_CHARS * 3)
+        prompt = build_retry_prompt("Do the thing", huge)
+        self.assertIn("truncated", prompt)
+        self.assertLess(len(prompt), len(huge))
+
+
+class TestVerifyFailureFedBackIntoRetry(unittest.TestCase):
+    """The user-reported gap: a retry re-sent the exact same prompt as the
+    previous failed attempt, with no idea verify_commands had failed or why,
+    so it just repeated whatever it did before against unchanged code. Each
+    retry should see the prior attempt's verify failure so it has a chance to
+    actually fix it."""
+
+    def test_second_attempt_prompt_contains_first_attempts_verify_failure(self):
+        from unittest.mock import patch
+        from orchestrator import main
+        import subprocess as sp
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sp.run(["git", "init", "-q"], cwd=tmpdir)
+            sp.run(["git", "config", "user.email", "tests@example.com"], cwd=tmpdir)
+            sp.run(["git", "config", "user.name", "Tests"], cwd=tmpdir)
+            (Path(tmpdir) / ".gitignore").write_text("orchestrator.pid\nreceived_prompts.log\n")
+            todo = Path(tmpdir) / "Todo.md"
+            todo.write_text("- [ ] Task one\n")
+            sp.run(["git", "add", "-A"], cwd=tmpdir)
+            sp.run(["git", "commit", "-q", "-m", "baseline"], cwd=tmpdir)
+
+            # Each invocation logs the received prompt (stdin) to a file and
+            # touches a tracked file so the attempt isn't flagged "suspicious".
+            prompt_log = Path(tmpdir) / "received_prompts.log"
+            provider_cmd = (
+                "python -c \""
+                "import sys; "
+                "open('received_prompts.log', 'a').write('===ATTEMPT===\\n' + sys.stdin.read() + '\\n'); "
+                "open('dummy.txt', 'a').write('x\\n')"
+                "\""
+            )
+            # Always fails verification with a distinctive marker so we can
+            # confirm the *next* attempt's prompt contains it.
+            fail_cmd = "python -c \"import sys; print('MARKER_lint_error_9f3'); sys.exit(1)\""
+            cfg_path = Path(tmpdir) / "config.json"
+            cfg_path.write_text(json.dumps({
+                "todo_file": str(todo),
+                "working_directory": tmpdir,
+                "require_manual_confirmation": False,
+                "continue_on_failure": True,
+                "max_retries_per_provider": 2,
+                "verify_commands": [fail_cmd],
+                "providers": [{"name": "p", "command": provider_cmd, "env": {}, "rate_limit_patterns": []}],
+            }))
+            state_path = Path(tmpdir) / "state.json"
+            state_path.write_text(json.dumps({"provider_cooldowns": {}}))
+            pid_path = Path(tmpdir) / "orchestrator.pid"
+
+            with patch.object(sys, 'argv', ['orchestrator.py', '--config', str(cfg_path), '--once']):
+                with patch('orchestrator.STATE_PATH', state_path):
+                    with patch('orchestrator.time.sleep'):
+                        with patch('orchestrator.log'):
+                            with patch('orchestrator.PID_PATH', pid_path):
+                                main()
+
+            attempts = prompt_log.read_text().split("===ATTEMPT===\n")[1:]
+            self.assertEqual(len(attempts), 2)
+            self.assertNotIn("MARKER_lint_error_9f3", attempts[0])
+            self.assertIn("MARKER_lint_error_9f3", attempts[1])
+            self.assertIn("previous attempt", attempts[1].lower())
+            # Task still fails overall (verify never passes) -- unrelated to
+            # what this test is checking, but confirms it wasn't wrongly
+            # auto-completed along the way.
+            self.assertIn("- [ ] Task one", todo.read_text())
 
 
 class TestSkipTask(unittest.TestCase):
@@ -652,11 +927,11 @@ class TestLintConfig(unittest.TestCase):
             "providers": [{"name": "claude-p", "command": "claude", "env": {}, "rate_limit_patterns": []}],
         })
         self.assertIn("bare/interactive", output)
-        self.assertIn("--no-interactive", output)
+        self.assertIn("--print", output)
 
     def test_no_warn_on_claude_with_headless_flag(self):
         output = self._run_lint({
-            "providers": [{"name": "claude-p", "command": "claude --no-interactive", "env": {}, "rate_limit_patterns": []}],
+            "providers": [{"name": "claude-p", "command": "claude --print", "env": {}, "rate_limit_patterns": []}],
         })
         self.assertNotIn("bare/interactive", output)
 

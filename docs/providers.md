@@ -36,7 +36,7 @@ The orchestrator launches your provider's `command` as a subprocess, passes the 
 ```json
 {
   "name": "claude",
-  "command": "claude --no-interactive --print",
+  "command": "claude -p --permission-mode bypassPermissions",
   "env": {"ANTHROPIC_API_KEY": "$ANTHROPIC_API_KEY"},
   "rate_limit_patterns": ["rate limit", "429", "overloaded", "capacity"],
   "cooldown_seconds": 600

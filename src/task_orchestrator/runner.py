@@ -56,6 +56,9 @@ LOG_MAX_BYTES = 10 * 1024 * 1024  # 10 MB per file
 LOG_BACKUP_COUNT = 5
 TASK_REGEX = r"- \[ \] (.+)"
 TAG_REGEX = r"(\[\w+\])"
+MAX_TASKS_PER_BATCH = 5  # hard cap -- one agent invocation covering too many
+# tasks at once makes the all-or-nothing verify/commit gate too coarse (a
+# single bad task in a big batch discards everything else alongside it).
 STALL_CPU_THRESHOLD = 12.0  # %cpu below this counts as "idle" for stall detection.
 # Calibrated from real observed data: a genuinely stalled process read 0-4%
 # CPU (event-loop/GC noise, not real work) and kept resetting the stall timer
@@ -181,14 +184,20 @@ def validate_config(config):
                 if "command" not in p or not p["command"]:
                     errors.append(f"Provider at index {i} missing or empty 'command'.")
 
+    if "tasks_per_batch" in config:
+        tpb = config["tasks_per_batch"]
+        if not isinstance(tpb, int) or isinstance(tpb, bool) or not (1 <= tpb <= MAX_TASKS_PER_BATCH):
+            errors.append(f"'tasks_per_batch' must be an integer between 1 and {MAX_TASKS_PER_BATCH} (got {tpb!r}).")
+
     if errors:
         sys.exit("Config validation failed:\n" + "\n".join(f"  - {e}" for e in errors))
 
 
 _INTERACTIVE_LAUNCHERS = {
     "claude": {
-        "headless_flags": ["--no-interactive", "--print", "-p"],
-        "message": "Claude Code is interactive by default; use --no-interactive or --print for unattended runs.",
+        "headless_flags": ["--print", "-p"],
+        "message": "Claude Code is interactive by default; use --print/-p for unattended runs "
+                   "(and --permission-mode bypassPermissions so it doesn't hang waiting for tool-use approval).",
     },
     "codex": {
         "headless_flags": ["--quiet", "--no-interactive"],
@@ -408,6 +417,20 @@ def log(msg, color=None):
         print(style(line, color) if color else line)
         with open(LOG_DIR / "orchestrator.log", "a") as f:
             f.write(line + "\n")  # plain text on disk -- no escape codes in the log file
+
+
+def log_file_only(msg):
+    """Same as log(), but never printed to the terminal -- for high-volume
+    content (a full agent transcript, a full verify_commands failure dump)
+    that belongs in logs/orchestrator.log, not scrolling past every short
+    status line a human watching the terminal actually wants to see."""
+    with _log_lock:
+        _rotate_log_file(LOG_DIR / "orchestrator.log")
+        LOG_DIR.mkdir(exist_ok=True)
+        ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        line = f"[{ts}] {_mask_secrets(msg)}"
+        with open(LOG_DIR / "orchestrator.log", "a") as f:
+            f.write(line + "\n")
 
 
 def _applescript_escape(text):
@@ -869,6 +892,31 @@ def print_progress(todo_path: Path, state, skip_sections=None):
     log(line, color="blue")
 
 
+# Cap on how much of a verify_commands failure gets appended to a retry
+# prompt. verify output is a full build/test log and can be huge; the goal is
+# just enough for the agent to see *what* broke, not to hand it the entire
+# transcript and burn tokens re-reading a wall of stack traces.
+VERIFY_FEEDBACK_MAX_CHARS = 4000
+
+
+def build_retry_prompt(base_prompt: str, verify_failure: str) -> str:
+    """Append a prior verify_commands failure to a task prompt.
+
+    Without this, a retry re-sends the exact same prompt the previous attempt
+    already saw, so the agent has no way to know verification failed or why --
+    it just repeats whatever it did before against unchanged code.
+    """
+    truncated = verify_failure[:VERIFY_FEEDBACK_MAX_CHARS]
+    if len(verify_failure) > VERIFY_FEEDBACK_MAX_CHARS:
+        truncated += "\n... (truncated)"
+    return (
+        f"{base_prompt}\n\n---\n"
+        "Your previous attempt at this task failed verification. Fix the "
+        "following issue(s) in addition to completing the task above, then "
+        f"stop:\n\n{truncated}"
+    )
+
+
 def build_prompt(task: str, template_path: Path):
     if template_path.exists():
         return template_path.read_text().replace("{{TASK}}", task)
@@ -1227,7 +1275,10 @@ class Provider:
         stdout = result.get("stdout", "")
         stderr = result.get("stderr", "")
         output = (stdout or "") + "\n" + (stderr or "")
-        print(_mask_secrets(output))  # still show live output in the terminal
+        # The agent's full transcript (tool calls, file reads, reasoning) can be
+        # thousands of lines -- that belongs in the log file, not scrolling past
+        # the short per-task status lines a human watching the terminal wants.
+        log_file_only(f"[{self.name}] full output:\n{output}")
 
         looked_rate_limited = any(p in output.lower() for p in self.rate_limit_patterns)
         return process.returncode, output, looked_rate_limited
@@ -1547,22 +1598,50 @@ def _build_html(state):
     return "".join(parts)
 
 def run_verification(config):
+    """Returns (verified: bool, failure_output: str | None).
+
+    failure_output is the command + its stdout/stderr for the first check that
+    failed (or timed out), so a caller can hand it back to the agent on retry
+    instead of just re-running the identical original prompt against code that
+    hasn't changed. None when every check passed.
+    """
     checks = config.get("verify_commands", [])
     if not checks:
-        return True
+        return True, None
+    # None means unbounded, matching subprocess_timeout's convention elsewhere --
+    # but unlike subprocess_timeout, there's no stall-detection backstop here
+    # (verify_commands runs after the agent's own subprocess has already
+    # exited), so a hanging build/test command would otherwise block the
+    # orchestrator forever with no way to recover. 1800s (30 min) is a
+    # generous default for a real build+test pass; override per-project via
+    # 'verify_timeout_seconds' if that's genuinely not enough.
+    timeout = config.get("verify_timeout_seconds", 1800)
     for cmd in checks:
         resolved_cmd = _resolve_shell_python(cmd)
         log(f"Verifying: {cmd}", color="cyan")
-        result = subprocess.run(
-            resolved_cmd, shell=True, cwd=config.get("working_directory", "."),
-            capture_output=True, text=True, errors="replace",
-        )
+        try:
+            result = subprocess.run(
+                resolved_cmd, shell=True, cwd=config.get("working_directory", "."),
+                capture_output=True, text=True, errors="replace", timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as e:
+            failure_msg = (
+                f"Verification TIMED OUT after {timeout}s: {cmd}\n"
+                f"{e.stdout or ''}\n{e.stderr or ''}"
+            )
+            # Full output (a build/test log can be huge) goes to the log file
+            # only; the terminal gets a one-line pointer, not the dump.
+            log_file_only(failure_msg)
+            log(f"Verification TIMED OUT after {timeout}s: {cmd} (see logs/orchestrator.log)", color="bold_red")
+            print(f"Verification TIMED OUT after {timeout}s: {cmd}", file=sys.stderr)
+            return False, failure_msg
         if result.returncode != 0:
             failure_msg = f"Verification FAILED: {cmd}\n{result.stdout}\n{result.stderr}"
-            log(failure_msg, color="bold_red")
-            print(failure_msg, file=sys.stderr)
-            return False
-    return True
+            log_file_only(failure_msg)
+            log(f"Verification FAILED: {cmd} (see logs/orchestrator.log)", color="bold_red")
+            print(f"Verification FAILED: {cmd}", file=sys.stderr)
+            return False, failure_msg
+    return True, None
 
 
 def git_commit(config, task: str):
@@ -1615,9 +1694,9 @@ def run_provider_stats(provider, working_directory: str, task: str):
 
     log(f"[{provider.name}] stats output (exit {result.returncode}):", color="dim")
     if stdout:
-        log(stdout)
+        log_file_only(stdout)
     if stderr:
-        log(stderr, color="yellow")
+        log_file_only(stderr)
 
     stats_payload = {"provider": provider.name, "task": task, "exit_code": result.returncode}
     if stdout:
@@ -1675,7 +1754,7 @@ def _run_single_task_for_parallel(task, providers, state, config, working_direct
         provider.reset_rate_limit_count(state)
 
         if exit_code == 0 and stat_output:
-            verified = run_verification(config)
+            verified, _ = run_verification(config)
             if verified:
                 mark_complete(Path(config["todo_file"]), task)
                 if config.get("auto_commit", False):
@@ -1699,6 +1778,7 @@ _INIT_DEFAULT_CONFIG = {
     "subprocess_timeout": 180,
     "stall_timeout_seconds": 600,
     "max_retries_per_provider": 3,
+    "tasks_per_batch": 1,
     "require_manual_confirmation": True,
     "continue_on_failure": True,
     "auto_commit": False,
@@ -1717,12 +1797,13 @@ _INIT_DEFAULT_CONFIG = {
 _INIT_DEFAULT_TODO = "# Todo\n\n## Backlog\n\n- [ ] Example task: replace this with your first real task\n"
 
 _INIT_DEFAULT_PROMPT = (
-    "Complete ONLY this task:\n{{TASK}}\n\n"
+    "Complete ONLY the task(s) below (there may be one, or a numbered batch of a few):\n{{TASK}}\n\n"
     "Rules:\n"
+    "- If more than one task is listed, complete all of them.\n"
     "- Modify code as needed.\n"
     "- Run tests if applicable.\n"
     "- Fix any errors you introduce.\n"
-    "- When finished, stop and exit. Do not start another task.\n"
+    "- When finished, stop and exit. Do not start another task beyond what's listed above.\n"
 )
 
 _INIT_GITIGNORE_LINES = [
@@ -2068,7 +2149,7 @@ def main():
                 provider.mark_exhausted(state, reason="rate_limited")
                 sys.exit(f"Provider '{provider.name}' rate-limited; ad-hoc task not completed. Re-run to try the next provider.")
             provider.reset_rate_limit_count(state)
-            verified = run_verification(config)
+            verified, _ = run_verification(config)
             if exit_code == 0 and verified:
                 log(f"Ad-hoc task finished successfully via '{provider.name}'.", color="bold_green")
                 if config.get("auto_commit", False):
@@ -2173,12 +2254,28 @@ def main():
                     time.sleep(delay)
                     continue  # re-read Todo.md for next iteration
 
-            task = tasks[0]
+            # tasks_per_batch (default 1, hard-capped at MAX_TASKS_PER_BATCH) bundles
+            # up to N pending tasks into a single agent invocation and a single
+            # verify_commands run, amortizing per-task build/test overhead across
+            # them. Completion is all-or-nothing: the batch shares one exit code,
+            # one git-diff check, and one verify_commands result, so there's no
+            # reliable way to attribute a mixed outcome to individual tasks --
+            # either every task in the batch is marked complete, or none are (same
+            # retry/defer/skip path a single failed task already takes).
+            batch_size = min(max(1, int(config.get("tasks_per_batch", 1))), MAX_TASKS_PER_BATCH)
+            batch_tasks = tasks[:batch_size]
+            if len(batch_tasks) == 1:
+                task = batch_tasks[0]
+            else:
+                task = "\n".join(f"{i + 1}. {t}" for i, t in enumerate(batch_tasks))
             _set_control_state("current_task", task)
             _set_control_state("skip_current_task", False)
             task_start_time = time.time()
             log("=" * 60, color="dim")
-            log(f"Starting task: {task}", color="bold_green")
+            if len(batch_tasks) > 1:
+                log(f"Starting batch of {len(batch_tasks)} tasks:\n{task}", color="bold_green")
+            else:
+                log(f"Starting task: {task}", color="bold_green")
             print_progress(todo_path, state, skip_sections=args.skip_section)
             log_json("task_start", task=task, provider_idx=provider_idx)
             update_dashboard_state(
@@ -2192,6 +2289,11 @@ def main():
             if task_timeout != subprocess_timeout:
                 log(f"Task timeout override: {task_timeout}s (global: {subprocess_timeout}s)", color="magenta")
             task_done = False
+            # Set once a verify_commands failure is seen for this task, then
+            # carried into every subsequent attempt's prompt (same provider or
+            # after rotating to the next one) until either it passes or the
+            # task is deferred/skipped -- see build_retry_prompt().
+            verify_failure_context = None
             _run_progress["completed"] = count_completed_tasks(todo_path, skip_sections=args.skip_section)
             _run_progress["total"] = count_total_tasks(todo_path, skip_sections=args.skip_section)
 
@@ -2217,13 +2319,17 @@ def main():
                 for attempt in range(1, max_retries_per_provider + 1):
                     if _get_control_state("skip_current_task", False):
                         log("Current task was skipped by interactive command; leaving it unchecked.", color="yellow")
-                        skipped_tasks.add(task)
+                        skipped_tasks.update(batch_tasks)
                         task_done = True
                         _set_control_state("skip_current_task", False)
                         break
 
                     log(f"[{provider.name}] attempt {attempt}/{max_retries_per_provider}", color="dim")
-                    exit_code, output, rate_limited = provider.run(prompt, working_directory, task_timeout)
+                    attempt_prompt = (
+                        build_retry_prompt(prompt, verify_failure_context)
+                        if verify_failure_context else prompt
+                    )
+                    exit_code, output, rate_limited = provider.run(attempt_prompt, working_directory, task_timeout)
 
                     # rate_limited is just a substring match over the CLI's combined
                     # output -- in this repo specifically, task text and generated code
@@ -2261,7 +2367,12 @@ def main():
                         log(f"[{provider.name}] timed out before finishing -- treating as a failed attempt.", color="bold_red")
                         continue
 
-                    verified = run_verification(config)
+                    verified, verify_output = run_verification(config)
+                    # Carried into attempt_prompt on the next loop iteration (same
+                    # provider, or after rotating to the next one) so the agent
+                    # actually sees what broke instead of blindly repeating this
+                    # attempt. Cleared once verification passes.
+                    verify_failure_context = verify_output if not verified else None
 
                     # exit_code == 0 alone isn't proof a task actually did anything --
                     # a real incident: kilo reported success on a task and had made
@@ -2304,7 +2415,7 @@ def main():
                             log(f"Providers: {print_provider_status(providers, state)}", color="blue")
                             break
                         elif answer == "skip-task":
-                            skipped_tasks.add(task)
+                            skipped_tasks.update(batch_tasks)
                             log(f"Task left unchecked and skipped for this cycle: {task}", color="yellow")
                             task_done = True
                             break
@@ -2323,11 +2434,15 @@ def main():
 
                 if attempt_success:
                     provider.reset_rate_limit_count(state)
-                    mark_complete(todo_path, task)
-                    skipped_tasks.discard(task)
-                    duration = time.time() - task_start_time
+                    for t in batch_tasks:
+                        mark_complete(todo_path, t)
+                    skipped_tasks.difference_update(batch_tasks)
+                    # duration is for the whole batch -- split evenly so the rolling
+                    # window stays one sample per completed task, keeping ETA/avg/
+                    # longest/shortest meaningful regardless of batch size.
+                    duration = (time.time() - task_start_time) / len(batch_tasks)
                     durations = state.get("completed_task_durations", [])
-                    durations.append(duration)
+                    durations.extend([duration] * len(batch_tasks))
                     state["completed_task_durations"] = durations[-200:]
                     save_state(state)
                     git_commit(config, task)
@@ -2381,10 +2496,11 @@ def main():
                         log("Stopping (on_failure=stop).", color="bold_red")
                         return
                     elif on_failure == "defer":
-                        defer_task(todo_path, task)
+                        for t in batch_tasks:
+                            defer_task(todo_path, t)
                         log(f"Task deferred to end of file: {task}", color="yellow")
                     else:  # "skip" (default)
-                        skipped_tasks.add(task)
+                        skipped_tasks.update(batch_tasks)
                     task_done = True  # move on to next task in Todo.md
                 else:
                     # Provider just got marked exhausted -> loop again to pick the next one immediately
