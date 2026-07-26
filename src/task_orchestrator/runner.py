@@ -270,7 +270,7 @@ def lint_config(config):
         if not cmd:
             continue
         try:
-            tokens = shlex.split(cmd)
+            tokens = shlex.split(cmd, posix=(os.name != "nt"))
         except ValueError:
             continue
         if not tokens:
@@ -636,9 +636,16 @@ def _resolve_shell_python(cmd: str) -> str:
     """Rewrite a leading bare 'python'/'python3' token in a shell command
     string to whichever interpreter _resolve_executable finds available.
     Used for verify_commands/stats_command, which run as shell strings
-    rather than argv lists."""
+    rather than argv lists.
+
+    These strings are executed with shell=True, which on Windows means
+    cmd.exe (not a POSIX shell). shlex only understands POSIX quoting, so
+    re-serializing the whole command with shlex.join() after splitting can
+    produce single-quoted output cmd.exe can't parse. Instead, substitute
+    just the leading token in the original string and leave everything
+    else -- including its original quoting -- untouched."""
     try:
-        tokens = shlex.split(cmd)
+        tokens = shlex.split(cmd, posix=(os.name != "nt"))
     except ValueError:
         return cmd
     if not tokens or tokens[0] not in _PYTHON_ALIASES:
@@ -646,8 +653,9 @@ def _resolve_shell_python(cmd: str) -> str:
     resolved = _resolve_executable(tokens[0])
     if resolved == tokens[0]:
         return cmd
-    tokens[0] = resolved
-    return shlex.join(tokens)
+    stripped = cmd.lstrip()
+    prefix_len = len(cmd) - len(stripped)
+    return cmd[:prefix_len] + resolved + stripped[len(tokens[0]):]
 
 
 # --------------------------------------------------------------------------
@@ -1119,7 +1127,7 @@ class Provider:
         global _current_process
         env = os.environ.copy()
         env.update(self.env)
-        cmd = shlex.split(self.command)
+        cmd = shlex.split(self.command, posix=(os.name != "nt"))
         if cmd:
             cmd[0] = _resolve_executable(cmd[0], env=env)
             if os.name == "nt" and cmd[0].lower().endswith(".ps1"):
@@ -1663,7 +1671,7 @@ def run_provider_stats(provider, working_directory: str, task: str):
         return
     log(f"[{provider.name}] collecting usage stats...", color="cyan")
     stats_env = {**os.environ, **provider.env}
-    tokens = shlex.split(stats_cmd)
+    tokens = shlex.split(stats_cmd, posix=(os.name != "nt"))
     if tokens:
         tokens[0] = _resolve_executable(tokens[0], env=stats_env)
     try:
@@ -1890,7 +1898,7 @@ def cmd_validate(config_path):
             continue
         cmd = p.get("command", "")
         try:
-            tokens = shlex.split(cmd)
+            tokens = shlex.split(cmd, posix=(os.name != "nt"))
         except ValueError:
             log(f"validate: provider '{name}' command could not be parsed: {cmd}", color="bold_red")
             ok = False
