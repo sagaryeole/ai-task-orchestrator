@@ -892,6 +892,31 @@ def print_progress(todo_path: Path, state, skip_sections=None):
     log(line, color="blue")
 
 
+# Cap on how much of a verify_commands failure gets appended to a retry
+# prompt. verify output is a full build/test log and can be huge; the goal is
+# just enough for the agent to see *what* broke, not to hand it the entire
+# transcript and burn tokens re-reading a wall of stack traces.
+VERIFY_FEEDBACK_MAX_CHARS = 4000
+
+
+def build_retry_prompt(base_prompt: str, verify_failure: str) -> str:
+    """Append a prior verify_commands failure to a task prompt.
+
+    Without this, a retry re-sends the exact same prompt the previous attempt
+    already saw, so the agent has no way to know verification failed or why --
+    it just repeats whatever it did before against unchanged code.
+    """
+    truncated = verify_failure[:VERIFY_FEEDBACK_MAX_CHARS]
+    if len(verify_failure) > VERIFY_FEEDBACK_MAX_CHARS:
+        truncated += "\n... (truncated)"
+    return (
+        f"{base_prompt}\n\n---\n"
+        "Your previous attempt at this task failed verification. Fix the "
+        "following issue(s) in addition to completing the task above, then "
+        f"stop:\n\n{truncated}"
+    )
+
+
 def build_prompt(task: str, template_path: Path):
     if template_path.exists():
         return template_path.read_text().replace("{{TASK}}", task)
@@ -1573,9 +1598,16 @@ def _build_html(state):
     return "".join(parts)
 
 def run_verification(config):
+    """Returns (verified: bool, failure_output: str | None).
+
+    failure_output is the command + its stdout/stderr for the first check that
+    failed (or timed out), so a caller can hand it back to the agent on retry
+    instead of just re-running the identical original prompt against code that
+    hasn't changed. None when every check passed.
+    """
     checks = config.get("verify_commands", [])
     if not checks:
-        return True
+        return True, None
     # None means unbounded, matching subprocess_timeout's convention elsewhere --
     # but unlike subprocess_timeout, there's no stall-detection backstop here
     # (verify_commands runs after the agent's own subprocess has already
@@ -1602,14 +1634,14 @@ def run_verification(config):
             log_file_only(failure_msg)
             log(f"Verification TIMED OUT after {timeout}s: {cmd} (see logs/orchestrator.log)", color="bold_red")
             print(f"Verification TIMED OUT after {timeout}s: {cmd}", file=sys.stderr)
-            return False
+            return False, failure_msg
         if result.returncode != 0:
             failure_msg = f"Verification FAILED: {cmd}\n{result.stdout}\n{result.stderr}"
             log_file_only(failure_msg)
             log(f"Verification FAILED: {cmd} (see logs/orchestrator.log)", color="bold_red")
             print(f"Verification FAILED: {cmd}", file=sys.stderr)
-            return False
-    return True
+            return False, failure_msg
+    return True, None
 
 
 def git_commit(config, task: str):
@@ -1722,7 +1754,7 @@ def _run_single_task_for_parallel(task, providers, state, config, working_direct
         provider.reset_rate_limit_count(state)
 
         if exit_code == 0 and stat_output:
-            verified = run_verification(config)
+            verified, _ = run_verification(config)
             if verified:
                 mark_complete(Path(config["todo_file"]), task)
                 if config.get("auto_commit", False):
@@ -2117,7 +2149,7 @@ def main():
                 provider.mark_exhausted(state, reason="rate_limited")
                 sys.exit(f"Provider '{provider.name}' rate-limited; ad-hoc task not completed. Re-run to try the next provider.")
             provider.reset_rate_limit_count(state)
-            verified = run_verification(config)
+            verified, _ = run_verification(config)
             if exit_code == 0 and verified:
                 log(f"Ad-hoc task finished successfully via '{provider.name}'.", color="bold_green")
                 if config.get("auto_commit", False):
@@ -2257,6 +2289,11 @@ def main():
             if task_timeout != subprocess_timeout:
                 log(f"Task timeout override: {task_timeout}s (global: {subprocess_timeout}s)", color="magenta")
             task_done = False
+            # Set once a verify_commands failure is seen for this task, then
+            # carried into every subsequent attempt's prompt (same provider or
+            # after rotating to the next one) until either it passes or the
+            # task is deferred/skipped -- see build_retry_prompt().
+            verify_failure_context = None
             _run_progress["completed"] = count_completed_tasks(todo_path, skip_sections=args.skip_section)
             _run_progress["total"] = count_total_tasks(todo_path, skip_sections=args.skip_section)
 
@@ -2288,7 +2325,11 @@ def main():
                         break
 
                     log(f"[{provider.name}] attempt {attempt}/{max_retries_per_provider}", color="dim")
-                    exit_code, output, rate_limited = provider.run(prompt, working_directory, task_timeout)
+                    attempt_prompt = (
+                        build_retry_prompt(prompt, verify_failure_context)
+                        if verify_failure_context else prompt
+                    )
+                    exit_code, output, rate_limited = provider.run(attempt_prompt, working_directory, task_timeout)
 
                     # rate_limited is just a substring match over the CLI's combined
                     # output -- in this repo specifically, task text and generated code
@@ -2326,7 +2367,12 @@ def main():
                         log(f"[{provider.name}] timed out before finishing -- treating as a failed attempt.", color="bold_red")
                         continue
 
-                    verified = run_verification(config)
+                    verified, verify_output = run_verification(config)
+                    # Carried into attempt_prompt on the next loop iteration (same
+                    # provider, or after rotating to the next one) so the agent
+                    # actually sees what broke instead of blindly repeating this
+                    # attempt. Cleared once verification passes.
+                    verify_failure_context = verify_output if not verified else None
 
                     # exit_code == 0 alone isn't proof a task actually did anything --
                     # a real incident: kilo reported success on a task and had made

@@ -25,6 +25,7 @@ from orchestrator import (
     git_run,
     validate_git_working_tree,
     run_verification,
+    build_retry_prompt,
     log_file_only,
     lint_config,
     lint_todo,
@@ -745,8 +746,9 @@ class TestVerifyLiveOutput(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch('orchestrator.log_file_only') as mock_file_only:
                 with patch('orchestrator.log') as mock_log:
-                    result = run_verification({"verify_commands": [fail_cmd], "working_directory": tmpdir})
+                    result, failure_output = run_verification({"verify_commands": [fail_cmd], "working_directory": tmpdir})
             self.assertFalse(result)
+            self.assertIn("verbose buildlog xyz", failure_output)
             file_only_calls = [str(c.args[0]) for c in mock_file_only.call_args_list]
             self.assertTrue(any("verbose buildlog xyz" in m for m in file_only_calls))
             terminal_calls = [str(c.args[0]) for c in mock_log.call_args_list]
@@ -757,22 +759,106 @@ class TestVerifyLiveOutput(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch('orchestrator.log_file_only') as mock_file_only:
                 with patch('orchestrator.log'):
-                    result = run_verification({"verify_commands": ["python -c \"pass\""], "working_directory": tmpdir})
+                    result, failure_output = run_verification({"verify_commands": ["python -c \"pass\""], "working_directory": tmpdir})
             self.assertTrue(result)
+            self.assertIsNone(failure_output)
             mock_file_only.assert_not_called()
 
     def test_verify_timeout_treated_as_failure(self):
         from unittest.mock import patch
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch('orchestrator.log') as mock_log:
-                result = run_verification({
+                result, failure_output = run_verification({
                     "verify_commands": ["python -c \"import time; time.sleep(5)\""],
                     "working_directory": tmpdir,
                     "verify_timeout_seconds": 0.1,
                 })
             self.assertFalse(result)
+            self.assertIn("TIMED OUT", failure_output)
             log_msgs = [str(c.args[0]) for c in mock_log.call_args_list]
             self.assertTrue(any("TIMED OUT" in m for m in log_msgs))
+
+
+class TestBuildRetryPrompt(unittest.TestCase):
+    def test_appends_verify_failure_to_prompt(self):
+        prompt = build_retry_prompt("Do the thing", "Verification FAILED: pnpm lint\nsome error")
+        self.assertIn("Do the thing", prompt)
+        self.assertIn("previous attempt", prompt.lower())
+        self.assertIn("Verification FAILED: pnpm lint", prompt)
+
+    def test_truncates_very_long_verify_failure(self):
+        from orchestrator import VERIFY_FEEDBACK_MAX_CHARS
+        huge = "x" * (VERIFY_FEEDBACK_MAX_CHARS * 3)
+        prompt = build_retry_prompt("Do the thing", huge)
+        self.assertIn("truncated", prompt)
+        self.assertLess(len(prompt), len(huge))
+
+
+class TestVerifyFailureFedBackIntoRetry(unittest.TestCase):
+    """The user-reported gap: a retry re-sent the exact same prompt as the
+    previous failed attempt, with no idea verify_commands had failed or why,
+    so it just repeated whatever it did before against unchanged code. Each
+    retry should see the prior attempt's verify failure so it has a chance to
+    actually fix it."""
+
+    def test_second_attempt_prompt_contains_first_attempts_verify_failure(self):
+        from unittest.mock import patch
+        from orchestrator import main
+        import subprocess as sp
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sp.run(["git", "init", "-q"], cwd=tmpdir)
+            sp.run(["git", "config", "user.email", "tests@example.com"], cwd=tmpdir)
+            sp.run(["git", "config", "user.name", "Tests"], cwd=tmpdir)
+            (Path(tmpdir) / ".gitignore").write_text("orchestrator.pid\nreceived_prompts.log\n")
+            todo = Path(tmpdir) / "Todo.md"
+            todo.write_text("- [ ] Task one\n")
+            sp.run(["git", "add", "-A"], cwd=tmpdir)
+            sp.run(["git", "commit", "-q", "-m", "baseline"], cwd=tmpdir)
+
+            # Each invocation logs the received prompt (stdin) to a file and
+            # touches a tracked file so the attempt isn't flagged "suspicious".
+            prompt_log = Path(tmpdir) / "received_prompts.log"
+            provider_cmd = (
+                "python -c \""
+                "import sys; "
+                "open('received_prompts.log', 'a').write('===ATTEMPT===\\n' + sys.stdin.read() + '\\n'); "
+                "open('dummy.txt', 'a').write('x\\n')"
+                "\""
+            )
+            # Always fails verification with a distinctive marker so we can
+            # confirm the *next* attempt's prompt contains it.
+            fail_cmd = "python -c \"import sys; print('MARKER_lint_error_9f3'); sys.exit(1)\""
+            cfg_path = Path(tmpdir) / "config.json"
+            cfg_path.write_text(json.dumps({
+                "todo_file": str(todo),
+                "working_directory": tmpdir,
+                "require_manual_confirmation": False,
+                "continue_on_failure": True,
+                "max_retries_per_provider": 2,
+                "verify_commands": [fail_cmd],
+                "providers": [{"name": "p", "command": provider_cmd, "env": {}, "rate_limit_patterns": []}],
+            }))
+            state_path = Path(tmpdir) / "state.json"
+            state_path.write_text(json.dumps({"provider_cooldowns": {}}))
+            pid_path = Path(tmpdir) / "orchestrator.pid"
+
+            with patch.object(sys, 'argv', ['orchestrator.py', '--config', str(cfg_path), '--once']):
+                with patch('orchestrator.STATE_PATH', state_path):
+                    with patch('orchestrator.time.sleep'):
+                        with patch('orchestrator.log'):
+                            with patch('orchestrator.PID_PATH', pid_path):
+                                main()
+
+            attempts = prompt_log.read_text().split("===ATTEMPT===\n")[1:]
+            self.assertEqual(len(attempts), 2)
+            self.assertNotIn("MARKER_lint_error_9f3", attempts[0])
+            self.assertIn("MARKER_lint_error_9f3", attempts[1])
+            self.assertIn("previous attempt", attempts[1].lower())
+            # Task still fails overall (verify never passes) -- unrelated to
+            # what this test is checking, but confirms it wasn't wrongly
+            # auto-completed along the way.
+            self.assertIn("- [ ] Task one", todo.read_text())
 
 
 class TestSkipTask(unittest.TestCase):
