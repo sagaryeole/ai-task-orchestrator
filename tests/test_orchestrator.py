@@ -1572,6 +1572,22 @@ class TestDashboardServer(unittest.TestCase):
             server.shutdown()
             server.server_close()
 
+    def test_version_endpoint_returns_version(self):
+        import urllib.request
+        from task_orchestrator import __version__ as expected_version
+        port = self._find_free_port()
+        server = start_dashboard(port)
+        self.assertIsNotNone(server)
+        try:
+            url = f"http://127.0.0.1:{port}/api/version"
+            req = urllib.request.urlopen(url, timeout=5)
+            self.assertIn("application/json", req.headers.get("Content-Type", ""))
+            data = json.loads(req.read().decode("utf-8"))
+            self.assertEqual(data["version"], expected_version)
+        finally:
+            server.shutdown()
+            server.server_close()
+
 
 class TestNonUTF8Output(unittest.TestCase):
     """Non-UTF-8 bytes in a provider CLI's stdout/stderr should not crash

@@ -34,7 +34,7 @@ Tasks to make the project easier to contribute to, easier to maintain, and frien
 ### Dashboard robustness
 
 - [ ] Add a `threading.Lock` around all mutations of `_dashboard_state`. The dashboard is mutated by the orchestrator main loop and read by `DashboardHandler` in a daemon thread; today this is "safe" only because the GIL serializes dict ops, which is an accident, not a guarantee.
-- [ ] Add `/api/version` endpoint that returns the current `__version__` from `task_orchestrator.__init__`, so the dashboard can display which version is running.
+- [x] Add `/api/version` endpoint that returns the current `__version__` from `task_orchestrator.__init__`, so the dashboard can display which version is running.
 - [ ] Make `open_dashboard_in_browser` state-aware: write a small sentinel file (e.g. `.dashboard_opened`) after the first auto-open so the browser tab is not re-opened on every `run_forever.sh` restart. Current behavior is annoying when the supervisor restarts the process after a transient crash.
 
 ### Package architecture — split `runner.py` into focused modules

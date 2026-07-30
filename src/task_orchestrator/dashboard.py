@@ -7,6 +7,8 @@ import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
+from . import __version__
+
 # --------------------------------------------------------------------------
 # Dashboard state
 # --------------------------------------------------------------------------
@@ -206,6 +208,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/api/state":
             self._serve_json()
+        elif self.path == "/api/version":
+            self._serve_version()
         elif self.path == "/health":
             self._serve_health()
         else:
@@ -213,6 +217,15 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     def _serve_health(self):
         body = b'{"status":"ok"}'
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _serve_version(self):
+        payload = {"version": __version__}
+        body = json.dumps(payload).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
