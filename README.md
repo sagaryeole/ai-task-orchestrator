@@ -17,6 +17,7 @@
 
 <p align="center">
   <a href="#quickstart">Quickstart</a> •
+  <a href="#dashboard-v2">Dashboard V2</a> •
   <a href="#worked-example-github-copilot-cli">Copilot Example</a> •
   <a href="#privacy--security">Privacy</a> •
   <a href="#providers-compatibility-matrix">Provider Matrix</a>
@@ -248,6 +249,61 @@ By default this uses whatever models your logged-in Copilot account has access t
    python orchestrator.py
    ```
 4. Watch `logs/orchestrator.log` (or the terminal) for progress; if `require_manual_confirmation` is `true`, respond to the prompt after each attempt.
+
+## Dashboard V2
+
+The built-in dashboard (`--dashboard-port`, defaults to `8765`) now uses a card-based board instead of the legacy table layout.
+
+![Dashboard V2 screenshot](docs/assets/dashboard-v2-screenshot.png)
+
+Newly delivered capabilities:
+
+- Startup UX: prints a clickable dashboard URL once at startup so users can open it directly from cmd/PowerShell.
+- Card status visuals: stronger status tinting for complete/running/failed/pending/skipped cards.
+- Task identity cues: provider badge + attempt badge on each task card.
+- Failure visibility: failed cards now get a red highlight pulse on state transition (complete stays green).
+- Mobile polish: improved modal and summary readability on narrow screens.
+
+Startup intro preview:
+
+![Task Orchestrator startup banner](docs/assets/startup-banner-preview.svg)
+
+- Header summary shows total/completed/failed/running/pending, progress fill, elapsed runtime, and ETA.
+- Provider chips show live `available` / `cooldown` state with countdowns.
+- Task cards are color-coded by status, show provider + duration + retry attempt, and update in-place every 3 seconds (no full-page flicker rebuild).
+- Clicking a card opens a modal with full details (timestamps, duration, exit code, verification result, and error summary).
+
+### `/api/state` additive fields
+
+`/api/state` remains backward-compatible. Existing fields are unchanged, and these fields are additive:
+
+```json
+{
+  "tasks": [
+    {
+      "title": "string",
+      "status": "pending|running|complete|failed|skipped",
+      "provider": "string|null",
+      "started_at": "ISO-8601|null",
+      "finished_at": "ISO-8601|null",
+      "duration_seconds": "number|null",
+      "attempt": "number",
+      "error_summary": "string|null",
+      "exit_code": "number|null",
+      "verification_passed": "boolean|null"
+    }
+  ],
+  "run_summary": {
+    "total": "number",
+    "completed": "number",
+    "failed": "number",
+    "running": "number",
+    "pending": "number",
+    "elapsed_seconds": "number",
+    "estimated_remaining_seconds": "number|null"
+  }
+}
+```
 
 ### Copilot-First Run (Windows/PowerShell)
 

@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="520" viewBox="0 0 1280 520" role="img" aria-labelledby="title desc">
+  <title id="title">Task Orchestrator startup banner preview</title>
+  <desc id="desc">Terminal-style preview of the Task Orchestrator startup intro banner with dashboard URL and provider details.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#111827" />
+    </linearGradient>
+    <linearGradient id="header" x1="0" x2="1" y1="0" y2="0">
+      <stop offset="0%" stop-color="#1e293b" />
+      <stop offset="100%" stop-color="#0f172a" />
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="520" rx="24" fill="url(#bg)" />
+  <rect x="20" y="20" width="1240" height="44" rx="14" fill="url(#header)" stroke="#334155" />
+  <circle cx="52" cy="42" r="8" fill="#ef4444" />
+  <circle cx="80" cy="42" r="8" fill="#f59e0b" />
+  <circle cx="108" cy="42" r="8" fill="#22c55e" />
+  <text x="150" y="47" fill="#cbd5e1" font-size="18" font-family="Consolas, 'Courier New', monospace">task-orchestrator startup preview</text>
+  <rect x="40" y="92" width="1200" height="388" rx="18" fill="#020617" stroke="#334155" />
+  <text x="68" y="140" fill="#67e8f9" font-size="27" font-weight="700" font-family="Consolas, 'Courier New', monospace"> _____         _      ____             _               _</text>
+  <text x="68" y="178" fill="#67e8f9" font-size="27" font-weight="700" font-family="Consolas, 'Courier New', monospace">|_   _|_ _ ___| | __ / ___|  ___   ___| | _____ _ __  | |_ ___  _ __</text>
+  <text x="68" y="216" fill="#67e8f9" font-size="27" font-weight="700" font-family="Consolas, 'Courier New', monospace">  | |/ _` / __| |/ / \___ \ / _ \ / __| |/ / _ \ '__| | __/ _ \| '__|</text>
+  <text x="68" y="254" fill="#67e8f9" font-size="27" font-weight="700" font-family="Consolas, 'Courier New', monospace">  | | (_| \__ \   &lt;   ___) | (_) | (__|   &lt;  __/ |    | || (_) | |</text>
+  <text x="68" y="292" fill="#67e8f9" font-size="27" font-weight="700" font-family="Consolas, 'Courier New', monospace">  |_|\__,_|___/_|\_\ |____/ \___/ \___|_|\_\___|_|     \__\___/|_|</text>
+  <text x="68" y="348" fill="#38bdf8" font-size="20" font-family="Consolas, 'Courier New', monospace">+--------------------------------------------------------------------------+</text>
+  <text x="68" y="382" fill="#cbd5e1" font-size="20" font-family="Consolas, 'Courier New', monospace">| Providers : 3 [copilot, claude, kilo]</text>
+  <text x="68" y="416" fill="#cbd5e1" font-size="20" font-family="Consolas, 'Courier New', monospace">| Mode      : unattended</text>
+  <text x="68" y="450" fill="#cbd5e1" font-size="20" font-family="Consolas, 'Courier New', monospace">| Dashboard : http://127.0.0.1:8765</text>
+  <text x="68" y="482" fill="#38bdf8" font-size="20" font-family="Consolas, 'Courier New', monospace">+--------------------------------------------------------------------------+</text>
+</svg>

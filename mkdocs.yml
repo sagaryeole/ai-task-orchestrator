@@ -26,6 +26,7 @@ theme:
 nav:
   - Home: index.md
   - Quickstart: quickstart.md
+  - Dashboard V2: dashboard-v2.md
   - Configuration Reference: configuration.md
   - Provider Guide: providers.md
   - FAQ: faq.md

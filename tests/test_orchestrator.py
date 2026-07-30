@@ -2069,6 +2069,39 @@ class TestAtomicStateWrite(unittest.TestCase):
 
 
 class TestNewCliFlags(unittest.TestCase):
+    def test_startup_prints_clickable_dashboard_url(self):
+        from unittest.mock import patch
+        from orchestrator import main
+        import socket
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            todo = Path(tmpdir) / "Todo.md"
+            todo.write_text("- [ ] Task one\n")
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(("127.0.0.1", 0))
+                free_port = s.getsockname()[1]
+
+            cfg_path = Path(tmpdir) / "config.json"
+            cfg_path.write_text(json.dumps({
+                "todo_file": str(todo),
+                "dashboard_port": free_port,
+                "providers": [
+                    {"name": "p", "command": "python3 -c \"print(1)\"", "env": {}, "rate_limit_patterns": []},
+                ],
+            }))
+            state_path = Path(tmpdir) / "state.json"
+            state_path.write_text(json.dumps({"provider_cooldowns": {}}))
+            pid_path = Path(tmpdir) / "orchestrator.pid"
+
+            argv = ["orchestrator.py", "--config", str(cfg_path), "--dry-run"]
+            with patch.object(sys, "argv", argv):
+                with patch("orchestrator.STATE_PATH", state_path):
+                    with patch("orchestrator.PID_PATH", pid_path):
+                        with patch("sys.stdout", new_callable=io.StringIO) as fake_stdout:
+                            main()
+            out = fake_stdout.getvalue()
+            self.assertIn("Dashboard URL: http://127.0.0.1:", out)
+
     def test_provider_flag_restricts_to_named_provider(self):
         from unittest.mock import patch
         from orchestrator import main

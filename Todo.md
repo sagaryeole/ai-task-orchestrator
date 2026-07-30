@@ -3,6 +3,44 @@
 Tasks for developing the orchestrator itself (`orchestrator.py`, `config.json`, prompts, docs).
 Grouped by priority — work top section first.
 
+## Dashboard V2 — Task Card UI
+
+Replace the current plain-log dashboard (`_build_html` table view) with a modern card-based task board. Still stdlib-only (no React/Vue/npm build step) — all HTML/CSS/JS inlined or served as static strings from `_build_html()`.
+
+### Backend — `/api/state` payload expansion
+
+- [x] Add a `tasks` array to the `/api/state` JSON response. Each entry: `{ "title": str, "status": "pending"|"running"|"complete"|"failed"|"skipped", "provider": str|null, "started_at": iso|null, "finished_at": iso|null, "duration_seconds": float|null, "attempt": int, "error_summary": str|null, "exit_code": int|null, "verification_passed": bool|null }`
+- [x] Populate `tasks` from the merged view of Todo.md (all `- [ ]` and `- [x]` lines) plus in-memory run history, so every task — pending, active, and finished — appears in the list
+- [x] Include a top-level `run_summary` object: `{ "total": int, "completed": int, "failed": int, "running": int, "pending": int, "elapsed_seconds": float, "estimated_remaining_seconds": float|null }`
+
+### Frontend — Card grid layout
+
+- [x] Render each task as a visual card (CSS grid/flexbox, 2–4 columns depending on viewport width, wrapping responsively) instead of a flat `<table>` row
+- [x] Card shows: task title (truncated to ~80 chars with `title` tooltip for full text), provider name/icon, elapsed or final duration (`mm:ss` format), and attempt count badge if > 1
+- [x] Color-code cards by status: green (`#22c55e`) background tint for complete, amber/yellow (`#f59e0b`) for running (with a subtle pulse animation), red (`#ef4444`) for failed, neutral gray (`#e5e7eb`) for pending, and slate (`#94a3b8`) for skipped
+- [x] Running card shows a live elapsed-time counter (JS `setInterval` ticking every second, driven by `started_at`)
+
+### Frontend — Click-to-expand detail popup
+
+- [x] Clicking a card opens a modal/overlay with full task details: full task text (untruncated), provider used, start/end timestamps, duration, exit code, verification result, and error summary (if failed)
+- [x] Modal is closeable by clicking outside, pressing Escape, or clicking an × button
+- [x] Modal content is populated from the existing `/api/state` JSON — no new endpoint needed
+
+### Frontend — Header bar with run summary
+
+- [x] Top-of-page summary bar showing: total tasks, completed count, failed count, running count, overall progress bar (percentage fill), wall-clock elapsed, and ETA
+- [x] Provider status chips (available / cooldown with countdown timer) rendered inline in the header, replacing the current separate provider table
+
+### Frontend — Auto-refresh and live updates
+
+- [x] Poll `/api/state` every 3 seconds (reduced from current 5s) and diff-update only changed cards (avoid full DOM rebuild on each tick to prevent flicker)
+- [x] Newly completed/failed cards get a brief highlight animation (CSS transition) so the user's eye is drawn to state changes
+
+### Constraints
+
+- No external JS/CSS frameworks — keep the entire dashboard as a single inlined HTML string returned by `_build_html()`, same as today, so there's zero build tooling and zero extra files to serve
+- Keep the existing `/api/state` backward-compatible — new fields are additive; any external tool parsing the current shape must still work
+- Dark-mode aware: use a dark background (`#0f172a` / `#1e293b` card) with light text, consistent with the logo/demo SVG branding
 
 ### Configuration Flexibility
 

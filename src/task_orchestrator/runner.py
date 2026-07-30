@@ -433,6 +433,36 @@ def log_file_only(msg):
             f.write(line + "\n")
 
 
+def _print_startup_banner(providers, dashboard_url, require_confirmation, enabled=True):
+    """Render a fun startup banner once per run in interactive terminals.
+
+    Kept off for non-TTY output so tests, pipes, and log redirection stay clean.
+    """
+    if not enabled or not sys.stdout.isatty():
+        return
+
+    provider_names = ", ".join(p.name for p in providers[:4])
+    if len(providers) > 4:
+        provider_names += ", ..."
+    run_mode = "manual confirmation" if require_confirmation else "unattended"
+    dashboard = dashboard_url or "disabled"
+
+    art = [
+        " _____         _      ____             _               _             ",
+        "|_   _|_ _ ___| | __ / ___|  ___   ___| | _____ _ __  | |_ ___  _ __ ",
+        "  | |/ _` / __| |/ / \\___ \\ / _ \\ / __| |/ / _ \\ '__| | __/ _ \\| '__|",
+        "  | | (_| \\__ \\   <   ___) | (_) | (__|   <  __/ |    | || (_) | |   ",
+        "  |_|\\__,_|___/_|\\_\\ |____/ \\___/ \\___|_|\\_\\___|_|     \\__\\___/|_|   ",
+    ]
+
+    print(style("\n" + "\n".join(art), "bold_cyan"))
+    print(style("+--------------------------------------------------------------------------+", "cyan"))
+    print(style(f"| Providers : {len(providers)} [{provider_names}]", "cyan"))
+    print(style(f"| Mode      : {run_mode}", "cyan"))
+    print(style(f"| Dashboard : {dashboard}", "cyan"))
+    print(style("+--------------------------------------------------------------------------+\n", "cyan"))
+
+
 def _applescript_escape(text):
     """Escape a string for safe interpolation into a double-quoted AppleScript
     literal. Without this, a title/message containing a double quote (e.g. a
@@ -1127,7 +1157,13 @@ class Provider:
         global _current_process
         env = os.environ.copy()
         env.update(self.env)
-        cmd = shlex.split(self.command, posix=(os.name != "nt"))
+        # Use POSIX splitting first even on Windows so quoted -c payloads
+        # become a single argument without embedded quote characters.
+        # Fall back to Windows-style tokenization for odd shell-style inputs.
+        try:
+            cmd = shlex.split(self.command, posix=True)
+        except ValueError:
+            cmd = shlex.split(self.command, posix=(os.name != "nt"))
         if cmd:
             cmd[0] = _resolve_executable(cmd[0], env=env)
             if os.name == "nt" and cmd[0].lower().endswith(".ps1"):
@@ -1353,10 +1389,166 @@ _dashboard_state = {
     "current_provider": None,
     "providers": {},
     "history": [],
+    "tasks": [],
+    "todo_file": None,
     "start_time": None,
 }
 
 _DASHBOARD_HISTORY_MAX = 50
+_CHECKBOX_TASK_RE = re.compile(r"^\s*[-*]\s\[([ xX])\]\s+(.+)$")
+
+
+def _iso_now():
+    return datetime.datetime.now().isoformat()
+
+
+def _load_all_todo_tasks(todo_path: Path):
+    """Return all checkbox tasks in file order, including checked and unchecked."""
+    tasks = []
+    if not todo_path.exists():
+        return tasks
+    for line in todo_path.read_text().splitlines():
+        m = _CHECKBOX_TASK_RE.match(line)
+        if not m:
+            continue
+        tasks.append({"title": m.group(2), "checked": m.group(1).lower() == "x"})
+    return tasks
+
+
+def _dashboard_task_id(title, index_for_title):
+    return f"{title}#{index_for_title}"
+
+
+def refresh_dashboard_tasks_from_todo(todo_path):
+    """Sync dashboard task cards with Todo.md while preserving runtime fields."""
+    state = _dashboard_state
+    todo_entries = _load_all_todo_tasks(todo_path)
+    previous = {t.get("id"): t for t in state.get("tasks", []) if isinstance(t, dict)}
+    counters = {}
+    merged = []
+    for entry in todo_entries:
+        title = entry["title"]
+        counters[title] = counters.get(title, 0) + 1
+        task_id = _dashboard_task_id(title, counters[title])
+        prev = previous.get(task_id, {})
+        status = prev.get("status")
+        if status is None:
+            status = "complete" if entry["checked"] else "pending"
+        elif entry["checked"] and status in ("pending", "running", "skipped", "failed"):
+            status = "complete"
+        elif (not entry["checked"]) and status == "complete":
+            status = "pending"
+        merged.append({
+            "id": task_id,
+            "title": title,
+            "status": status,
+            "provider": prev.get("provider"),
+            "started_at": prev.get("started_at"),
+            "finished_at": prev.get("finished_at"),
+            "duration_seconds": prev.get("duration_seconds"),
+            "attempt": int(prev.get("attempt", 0)),
+            "error_summary": prev.get("error_summary"),
+            "exit_code": prev.get("exit_code"),
+            "verification_passed": prev.get("verification_passed"),
+        })
+    state["tasks"] = merged
+    state["todo_file"] = str(todo_path)
+
+
+def _find_next_task_card(title, preferred_statuses=None):
+    preferred_statuses = preferred_statuses or ("pending", "skipped", "failed", "running")
+    cards = _dashboard_state.get("tasks", [])
+    for card in cards:
+        if card.get("title") == title and card.get("status") in preferred_statuses:
+            return card
+    for card in cards:
+        if card.get("title") == title:
+            return card
+    return None
+
+
+def mark_dashboard_tasks_running(task_titles, provider, attempt):
+    now_iso = _iso_now()
+    for title in task_titles:
+        card = _find_next_task_card(title, preferred_statuses=("pending", "skipped", "failed", "running"))
+        if not card:
+            continue
+        card["status"] = "running"
+        card["provider"] = provider
+        if not card.get("started_at") or card.get("finished_at"):
+            card["started_at"] = now_iso
+        card["finished_at"] = None
+        card["duration_seconds"] = None
+        card["attempt"] = max(int(card.get("attempt", 0)), int(attempt))
+        card["error_summary"] = None
+        card["exit_code"] = None
+        card["verification_passed"] = None
+
+
+def mark_dashboard_tasks_skipped(task_titles, provider=None):
+    now_iso = _iso_now()
+    for title in task_titles:
+        card = _find_next_task_card(title)
+        if not card:
+            continue
+        card["status"] = "skipped"
+        if provider:
+            card["provider"] = provider
+        card["finished_at"] = now_iso
+        if card.get("started_at") and card.get("duration_seconds") is None:
+            try:
+                started = datetime.datetime.fromisoformat(card["started_at"])
+                card["duration_seconds"] = max(0.0, (datetime.datetime.now() - started).total_seconds())
+            except Exception:
+                pass
+        card["verification_passed"] = None
+
+
+def mark_dashboard_tasks_finished(task_titles, status, provider, duration_seconds, exit_code=None, verification_passed=None, error_summary=None):
+    now_dt = datetime.datetime.now()
+    now_iso = now_dt.isoformat()
+    for title in task_titles:
+        card = _find_next_task_card(title)
+        if not card:
+            continue
+        card["status"] = status
+        card["provider"] = provider
+        if not card.get("started_at"):
+            try:
+                card["started_at"] = (now_dt - datetime.timedelta(seconds=float(duration_seconds))).isoformat()
+            except Exception:
+                card["started_at"] = now_iso
+        card["finished_at"] = now_iso
+        card["duration_seconds"] = float(duration_seconds) if duration_seconds is not None else None
+        card["exit_code"] = exit_code
+        card["verification_passed"] = verification_passed
+        card["error_summary"] = error_summary
+
+
+def _build_run_summary(state):
+    tasks = state.get("tasks", [])
+    total = len(tasks)
+    completed = sum(1 for t in tasks if t.get("status") == "complete")
+    failed = sum(1 for t in tasks if t.get("status") == "failed")
+    running = sum(1 for t in tasks if t.get("status") == "running")
+    pending = sum(1 for t in tasks if t.get("status") == "pending")
+    elapsed_seconds = 0.0
+    if state.get("start_time"):
+        elapsed_seconds = max(0.0, time.time() - state.get("start_time"))
+    completed_durations = [t.get("duration_seconds") for t in tasks if t.get("status") == "complete" and isinstance(t.get("duration_seconds"), (int, float))]
+    estimated_remaining_seconds = None
+    if completed_durations and pending > 0:
+        avg = sum(completed_durations) / len(completed_durations)
+        estimated_remaining_seconds = max(0.0, avg * pending)
+    return {
+        "total": total,
+        "completed": completed,
+        "failed": failed,
+        "running": running,
+        "pending": pending,
+        "elapsed_seconds": round(elapsed_seconds, 1),
+        "estimated_remaining_seconds": round(estimated_remaining_seconds, 1) if estimated_remaining_seconds is not None else None,
+    }
 
 
 class DashboardHandler(BaseHTTPRequestHandler):
@@ -1393,6 +1585,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
             "current_provider": state.get("current_provider"),
             "providers": provider_list,
             "history": state.get("history", []),
+            "tasks": state.get("tasks", []),
+            "run_summary": _build_run_summary(state),
             "uptime_seconds": round(now - state.get("start_time", now), 1) if state.get("start_time") else 0,
         }
         body = json.dumps(payload, indent=2).encode("utf-8")
@@ -1445,7 +1639,7 @@ def start_dashboard(port, retry_on_port_in_use=False, max_attempts=20):
     return None
 
 
-def update_dashboard_state(current_task=None, current_provider=None, provider_status=None, history_entry=None):
+def update_dashboard_state(current_task=None, current_provider=None, provider_status=None, history_entry=None, todo_path=None):
     """Update the shared dashboard state. Called from the orchestrator main loop."""
     state = _dashboard_state
     if current_task is not None:
@@ -1459,6 +1653,8 @@ def update_dashboard_state(current_task=None, current_provider=None, provider_st
         state["history"].append(history_entry)
         if len(state["history"]) > _DASHBOARD_HISTORY_MAX:
             state["history"] = state["history"][-_DASHBOARD_HISTORY_MAX:]
+    if todo_path is not None:
+        refresh_dashboard_tasks_from_todo(Path(todo_path))
     if state.get("start_time") is None:
         state["start_time"] = time.time()
 
@@ -1489,116 +1685,258 @@ def html_escape(text):
 def _build_html(state):
     now = time.time()
     uptime = round(now - state.get("start_time", now), 1) if state.get("start_time") else 0
-    current_task = state.get("current_task") or "idle"
-    current_provider = state.get("current_provider") or "none"
-
-    provider_rows = ""
-    for name, info in state.get("providers", {}).items():
-        available = info.get("available", False)
-        cooldown_until = info.get("cooldown_until")
-        if available:
-            status_class = "available"
-            status_text = "available"
-        elif cooldown_until:
-            remaining = max(0, int(cooldown_until - now))
-            status_class = "cooldown"
-            status_text = "cooldown ({0}s)".format(remaining)
-        else:
-            status_class = "cooldown"
-            status_text = "unknown"
-        provider_rows += (
-            '<tr><td>{0}</td>'
-            '<td class="{1}">{2}</td></tr>\n'
-        ).format(html_escape(name), status_class, status_text)
-
-    history_rows = ""
-    for entry in state.get("history", []):
-        status_class = "complete" if entry.get("status") == "complete" else "failed"
-        history_rows += (
-            '<tr><td>{0}</td>'
-            '<td>{1}</td>'
-            '<td class="{2}">{3}</td>'
-            '<td>{4}</td></tr>\n'
-        ).format(
-            html_escape(entry.get("task", "")),
-            html_escape(entry.get("provider", "")),
-            status_class,
-            entry.get("status", ""),
-            html_escape(entry.get("timestamp", "")),
-        )
-
-    if not history_rows:
-        history_rows = '<tr><td colspan="4">No history yet</td></tr>\n'
+    current_task = html_escape(state.get("current_task") or "idle")
+    current_provider = html_escape(state.get("current_provider") or "none")
+    history = state.get("history", [])
+    history_hint = "No history yet" if not history else ""
+    history_items = []
+    if history:
+        for entry in history[-12:][::-1]:
+            status = html_escape(entry.get("status", ""))
+            provider = html_escape(entry.get("provider", "none"))
+            task_name = html_escape(entry.get("task", ""))
+            history_items.append(f"<li>{status} • {provider} • {task_name}</li>")
+    history_items_html = "".join(history_items)
 
     parts = [
         '<!DOCTYPE html><html><head><meta charset="utf-8">',
+        '<meta name="viewport" content="width=device-width, initial-scale=1">',
         '<title>Orchestrator Dashboard</title>',
         '<style>',
-        'body{font-family:sans-serif;margin:2em;background:#f5f5f5;color:#333}',
-        'h1{color:#333}',
-        '.card{background:#fff;padding:1em;margin:1em 0;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.1)}',
-        'table{border-collapse:collapse;width:100%}',
-        'th,td{padding:0.5em;text-align:left;border-bottom:1px solid #eee}',
-        '.available{color:green;font-weight:bold}',
-        '.cooldown{color:orange;font-weight:bold}',
-        '.complete{color:green}',
-        '.failed{color:red}',
-        '.uptime{color:#666;font-size:0.9em}',
-        '</style></head><body>',
-        '<h1>Orchestrator Dashboard</h1>',
-        '<p class="uptime" id="uptime">Uptime: {0}s</p>'.format(uptime),
-        '<div class="card"><h2>Current Task</h2>',
-        '<p><strong>Task:</strong> <span id="current-task">{0}</span></p>'.format(html_escape(current_task)),
-        '<p><strong>Provider:</strong> <span id="current-provider">{0}</span></p></div>'.format(html_escape(current_provider)),
-        '<div class="card"><h2>Providers</h2>',
-        '<table><tr><th>Provider</th><th>Status</th></tr><tbody id="providers-body">',
-        provider_rows,
-        '</tbody></table></div>',
-        '<div class="card"><h2>Recent History</h2>',
-        '<table><tr><th>Task</th><th>Provider</th><th>Status</th><th>Time</th></tr><tbody id="history-body">',
-        history_rows,
-        '</tbody></table></div>',
+        ':root{--bg:#0f172a;--panel:#1e293b;--panel2:#0b1220;--text:#e2e8f0;--muted:#94a3b8;--ok:#22c55e;--warn:#f59e0b;--bad:#ef4444;--pending:#64748b;--skipped:#94a3b8;--border:#334155}',
+        '*{box-sizing:border-box}',
+        'body{margin:0;background:radial-gradient(circle at 20% 0%,#1e293b 0,#0f172a 55%);color:var(--text);font-family:Segoe UI,Arial,sans-serif}',
+        '.wrap{padding:20px;max-width:1400px;margin:0 auto}',
+        '.top{background:rgba(15,23,42,.7);border:1px solid var(--border);backdrop-filter:blur(6px);padding:16px;border-radius:14px;position:sticky;top:10px;z-index:10}',
+        '.title{font-size:28px;font-weight:700;margin:0 0 6px 0}',
+        '.meta{display:flex;flex-wrap:wrap;gap:14px;color:var(--muted);font-size:14px}',
+        '.summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-top:14px}',
+        '.metric{background:var(--panel2);border:1px solid var(--border);border-radius:10px;padding:10px}',
+        '.metric .k{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}',
+        '.metric .v{font-size:20px;font-weight:700;margin-top:3px}',
+        '.progress{height:10px;border-radius:999px;background:#0b1220;border:1px solid var(--border);overflow:hidden;margin-top:12px}',
+        '.progress > i{display:block;height:100%;background:linear-gradient(90deg,var(--ok),#14b8a6);width:0}',
+        '.providers{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}',
+        '.chip{font-size:12px;border-radius:999px;padding:4px 10px;border:1px solid var(--border);background:#0b1220;color:var(--muted)}',
+        '.chip.available{color:var(--ok);border-color:#166534}',
+        '.chip.cooldown{color:var(--warn);border-color:#92400e}',
+        '.board{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;margin-top:18px}',
+        '.task{border:1px solid var(--border);border-left-width:5px;border-radius:12px;padding:12px;background:linear-gradient(180deg,rgba(30,41,59,.95),rgba(15,23,42,.95));cursor:pointer;transition:transform .15s ease,border-color .2s ease,box-shadow .2s ease}',
+        '.task:hover{transform:translateY(-2px);box-shadow:0 10px 22px rgba(0,0,0,.28)}',
+        '.task .t{font-weight:650;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}',
+        '.task .sub{margin-top:10px;font-size:12px;color:var(--muted);display:flex;justify-content:space-between;gap:8px;align-items:center}',
+        '.provider-badge{display:inline-block;border:1px solid var(--border);border-radius:999px;padding:2px 8px;background:#0b1220;color:#cbd5e1;font-family:Consolas,Monaco,monospace}',
+        '.attempt-badge{display:inline-block;margin-left:6px;border:1px solid #475569;border-radius:999px;padding:2px 7px;color:#cbd5e1;background:rgba(15,23,42,.65)}',
+        '.task .status{font-size:12px;text-transform:uppercase;letter-spacing:.07em;font-weight:700;margin-top:8px}',
+        '.task.pending{border-left-color:var(--pending);background:linear-gradient(180deg,rgba(100,116,139,.18),rgba(15,23,42,.95))}',
+        '.task.pending .status{color:#cbd5e1}',
+        '.task.running{border-left-color:var(--warn);background:linear-gradient(180deg,rgba(245,158,11,.20),rgba(15,23,42,.95));animation:pulse 1.5s infinite}',
+        '.task.running .status{color:#fde68a}',
+        '.task.complete{border-left-color:var(--ok);background:linear-gradient(180deg,rgba(34,197,94,.18),rgba(15,23,42,.95))}',
+        '.task.complete .status{color:#86efac}',
+        '.task.failed{border-left-color:var(--bad);background:linear-gradient(180deg,rgba(239,68,68,.20),rgba(15,23,42,.95))}',
+        '.task.failed .status{color:#fecaca}',
+        '.task.skipped{border-left-color:var(--skipped);background:linear-gradient(180deg,rgba(148,163,184,.16),rgba(15,23,42,.95))}',
+        '.task.skipped .status{color:#cbd5e1}',
+        '@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(245,158,11,.0)}50%{box-shadow:0 0 0 4px rgba(245,158,11,.18)}}',
+        '.events{margin-top:14px;background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:12px}',
+        '.events h3{margin:0 0 10px 0;font-size:16px}',
+        '.events-list{margin:0;padding:0;list-style:none;font-size:13px;color:var(--muted)}',
+        '.events-list li{padding:5px 0;border-top:1px solid rgba(148,163,184,.15)}',
+        '.events-list li:first-child{border-top:none}',
+        '.modal{position:fixed;inset:0;background:rgba(2,6,23,.72);display:none;align-items:center;justify-content:center;padding:18px;z-index:30}',
+        '.modal.open{display:flex}',
+        '.sheet{width:min(760px,96vw);max-height:86vh;overflow:auto;background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:16px}',
+        '.sheet h3{margin:0 0 10px 0;font-size:20px}',
+        '.sheet .row{display:grid;grid-template-columns:180px 1fr;gap:8px;font-size:14px;padding:5px 0;border-top:1px solid rgba(148,163,184,.17)}',
+        '.sheet .row:first-of-type{border-top:none}',
+        '.close{float:right;background:#0b1220;border:1px solid var(--border);color:var(--text);border-radius:8px;padding:4px 9px;cursor:pointer}',
+        '.hint{color:var(--muted);font-size:12px;margin-top:6px}',
+        '@media (max-width:640px){.wrap{padding:12px}.top{top:6px;padding:12px}.title{font-size:22px}.sheet{padding:12px}.sheet .row{grid-template-columns:1fr;gap:3px}}',
+        '</style></head><body><div class="wrap">',
+        '<section class="top">',
+        '<h1 class="title">Orchestrator Dashboard</h1>',
+        '<div class="meta">',
+        '<span id="uptime">Uptime: {0}s</span>'.format(uptime),
+        '<span id="current-task">Task: {0}</span>'.format(current_task),
+        '<span id="current-provider">Provider: {0}</span>'.format(current_provider),
+        '</div>',
+        '<div class="summary">',
+        '<div class="metric"><div class="k">Total</div><div class="v" id="m-total">0</div></div>',
+        '<div class="metric"><div class="k">Completed</div><div class="v" id="m-completed">0</div></div>',
+        '<div class="metric"><div class="k">Failed</div><div class="v" id="m-failed">0</div></div>',
+        '<div class="metric"><div class="k">Running</div><div class="v" id="m-running">0</div></div>',
+        '<div class="metric"><div class="k">Pending</div><div class="v" id="m-pending">0</div></div>',
+        '<div class="metric"><div class="k">ETA</div><div class="v" id="m-eta">--</div></div>',
+        '</div>',
+        '<div class="progress"><i id="progress-fill"></i></div>',
+        '<div class="providers" id="providers-chips"></div>',
+        '</section>',
+        '<section class="board" id="task-board"></section>',
+        '<section class="events"><h3>Recent Events</h3><ul class="events-list" id="events-list">{0}</ul></section>'.format(
+            history_items_html if history_items_html else f"<li>{html_escape(history_hint or 'Loading...')}</li>"
+        ),
+        '<p class="hint">Click a card for full task details. Status colors: green complete, yellow running, red failed.</p>',
+        '</div>',
+        '<div class="modal" id="task-modal"><div class="sheet">',
+        '<button class="close" id="modal-close">×</button>',
+        '<h3 id="modal-title">Task</h3>',
+        '<div class="row"><strong>Status</strong><span id="modal-status"></span></div>',
+        '<div class="row"><strong>Provider</strong><span id="modal-provider"></span></div>',
+        '<div class="row"><strong>Attempt</strong><span id="modal-attempt"></span></div>',
+        '<div class="row"><strong>Started</strong><span id="modal-started"></span></div>',
+        '<div class="row"><strong>Finished</strong><span id="modal-finished"></span></div>',
+        '<div class="row"><strong>Duration</strong><span id="modal-duration"></span></div>',
+        '<div class="row"><strong>Exit Code</strong><span id="modal-exit"></span></div>',
+        '<div class="row"><strong>Verification</strong><span id="modal-verify"></span></div>',
+        '<div class="row"><strong>Error</strong><span id="modal-error"></span></div>',
+        '</div></div>',
         '<script>',
-        'async function refreshState(){',
-        '  try {',
-        '    const r = await fetch("/api/state", {cache:"no-store"});',
-        '    if(!r.ok) return;',
-        '    const d = await r.json();',
-        '    document.getElementById("uptime").textContent = `Uptime: ${d.uptime_seconds}s`;',
-        '    document.getElementById("current-task").textContent = d.current_task || "idle";',
-        '    document.getElementById("current-provider").textContent = d.current_provider || "none";',
-        '    const pb = document.getElementById("providers-body");',
-        '    pb.innerHTML = "";',
-        '    for (const p of d.providers || []) {',
-        '      const tr = document.createElement("tr");',
-        '      const tdName = document.createElement("td"); tdName.textContent = p.name || "";',
-        '      const tdStatus = document.createElement("td");',
-        '      const now = Date.now() / 1000;',
-        '      if (p.available) { tdStatus.textContent = "available"; tdStatus.className = "available"; }',
-        '      else if (p.cooldown_until) { tdStatus.textContent = `cooldown (${Math.max(0, Math.floor(p.cooldown_until - now))}s)`; tdStatus.className = "cooldown"; }',
-        '      else { tdStatus.textContent = "unknown"; tdStatus.className = "cooldown"; }',
-        '      tr.appendChild(tdName); tr.appendChild(tdStatus); pb.appendChild(tr);',
+        'const board=document.getElementById("task-board");',
+        'const modal=document.getElementById("task-modal");',
+        'const closeBtn=document.getElementById("modal-close");',
+        'let taskMap=new Map();',
+        'let latestData={tasks:[]};',
+        'function esc(s){return (s ?? "").toString();}',
+        'function providerLabel(name){const n=esc(name)||"none"; const first=(n.trim()[0]||"?").toUpperCase(); return `[${first}] ${n}`;}',
+        'function fmtDur(v){if(v===null||v===undefined||v==="") return "--"; const n=Math.max(0,Math.floor(Number(v))); const m=Math.floor(n/60); const s=n%60; return `${m}:${String(s).padStart(2,"0")}`;}',
+        'function fmtEta(v){if(v===null||v===undefined) return "--"; const n=Math.max(0,Math.floor(Number(v))); if(n<60) return `${n}s`; const m=Math.floor(n/60); const s=n%60; if(m<60) return `${m}m ${s}s`; const h=Math.floor(m/60); const rm=m%60; return `${h}h ${rm}m`;}',
+        'function openModal(task){',
+        '  document.getElementById("modal-title").textContent=esc(task.title);',
+        '  document.getElementById("modal-status").textContent=esc(task.status);',
+        '  document.getElementById("modal-provider").textContent=esc(task.provider)||"none";',
+        '  document.getElementById("modal-attempt").textContent=String(task.attempt||0);',
+        '  document.getElementById("modal-started").textContent=esc(task.started_at)||"--";',
+        '  document.getElementById("modal-finished").textContent=esc(task.finished_at)||"--";',
+        '  document.getElementById("modal-duration").textContent=fmtDur(task.duration_seconds);',
+        '  document.getElementById("modal-exit").textContent=(task.exit_code===null||task.exit_code===undefined)?"--":String(task.exit_code);',
+        '  document.getElementById("modal-verify").textContent=(task.verification_passed===null||task.verification_passed===undefined)?"--":String(task.verification_passed);',
+        '  document.getElementById("modal-error").textContent=esc(task.error_summary)||"--";',
+        '  modal.classList.add("open");',
+        '}',
+        'closeBtn.addEventListener("click",()=>modal.classList.remove("open"));',
+        'modal.addEventListener("click",(e)=>{if(e.target===modal){modal.classList.remove("open")}});',
+        'window.addEventListener("keydown",(e)=>{if(e.key==="Escape") modal.classList.remove("open")});',
+        'function taskHash(t){return JSON.stringify([t.status,t.provider,t.started_at,t.finished_at,t.duration_seconds,t.attempt,t.exit_code,t.verification_passed,t.error_summary]);}',
+        'function renderTaskCard(task){',
+        '  const el=document.createElement("article");',
+        '  el.className=`task ${task.status||"pending"}`;',
+        '  el.dataset.id=task.id;',
+        '  el.dataset.startedAt=task.started_at||"";',
+        '  el.dataset.status=task.status||"pending";',
+        '  const attempts=(task.attempt&&task.attempt>1)?`<span class="attempt-badge">attempt ${task.attempt}</span>`:"";',
+        '  el.innerHTML=`<div class="t" title="${esc(task.title)}">${esc(task.title)}</div><div class="status">${esc(task.status||"pending")}</div><div class="sub"><span><span class="provider-badge">${providerLabel(task.provider)}</span>${attempts}</span><span class="dur">${fmtDur(task.duration_seconds)}</span></div>`;',
+        '  el.addEventListener("click",()=>openModal(task));',
+        '  return el;',
+        '}',
+        'function syncTaskCards(tasks){',
+        '  const nextIds=new Set();',
+        '  for(const t of tasks){',
+        '    const id=t.id||t.title;',
+        '    nextIds.add(id);',
+        '    const hash=taskHash(t);',
+        '    const existing=taskMap.get(id);',
+        '    if(!existing){',
+        '      const card=renderTaskCard(t);',
+        '      card.dataset.hash=hash;',
+        '      board.appendChild(card);',
+        '      taskMap.set(id, card);',
+        '      continue;',
         '    }',
-        '    const hb = document.getElementById("history-body");',
-        '    hb.innerHTML = "";',
-        '    const hist = d.history || [];',
-        '    if (hist.length === 0) {',
-        '      const tr = document.createElement("tr");',
-        '      const td = document.createElement("td"); td.colSpan = 4; td.textContent = "No history yet";',
-        '      tr.appendChild(td); hb.appendChild(tr);',
-        '    } else {',
-        '      for (const h of hist) {',
-        '        const tr = document.createElement("tr");',
-        '        const t1 = document.createElement("td"); t1.textContent = h.task || "";',
-        '        const t2 = document.createElement("td"); t2.textContent = h.provider || "";',
-        '        const t3 = document.createElement("td"); t3.textContent = h.status || ""; t3.className = (h.status === "complete" ? "complete" : "failed");',
-        '        const t4 = document.createElement("td"); t4.textContent = h.timestamp || "";',
-        '        tr.appendChild(t1); tr.appendChild(t2); tr.appendChild(t3); tr.appendChild(t4); hb.appendChild(tr);',
+        '    if(existing.dataset.hash!==hash){',
+        '      const card=renderTaskCard(t);',
+        '      card.dataset.hash=hash;',
+        '      existing.replaceWith(card);',
+        '      taskMap.set(id, card);',
+        '      if(t.status==="complete"||t.status==="failed"){',
+        '        const glow=t.status==="failed"?"rgba(239,68,68,.35)":"rgba(34,197,94,.35)";',
+        '        card.style.boxShadow=`0 0 0 3px ${glow}`;',
+        '        setTimeout(()=>{card.style.boxShadow=""},900);',
         '      }',
         '    }',
+        '  }',
+        '  for(const [id,el] of taskMap.entries()){',
+        '    if(!nextIds.has(id)){',
+        '      el.remove();',
+        '      taskMap.delete(id);',
+        '    }',
+        '  }',
+        '}',
+        'function tickRunningDurations(){',
+        '  const now=Date.now();',
+        '  board.querySelectorAll(".task.running").forEach((card)=>{',
+        '    const started=card.dataset.startedAt;',
+        '    if(!started) return;',
+        '    const ms=Date.parse(started);',
+        '    if(Number.isNaN(ms)) return;',
+        '    const dur=Math.max(0,Math.floor((now-ms)/1000));',
+        '    const durEl=card.querySelector(".dur");',
+        '    if(durEl) durEl.textContent=fmtDur(dur);',
+        '  });',
+        '}',
+        'function renderProviders(list){',
+        '  const root=document.getElementById("providers-chips");',
+        '  root.innerHTML="";',
+        '  const now=Date.now()/1000;',
+        '  for(const p of list||[]){',
+        '    const el=document.createElement("span");',
+        '    if(p.available){',
+        '      el.className="chip available";',
+        '      el.textContent=`available • ${p.name}`;',
+        '    } else if(p.cooldown_until){',
+        '      el.className="chip cooldown";',
+        '      el.textContent=`cooldown • ${p.name} (${Math.max(0,Math.floor(p.cooldown_until-now))}s)`;',
+        '    } else {',
+        '      el.className="chip cooldown";',
+        '      el.textContent=`cooldown • ${p.name}`;',
+        '    }',
+        '    root.appendChild(el);',
+        '  }',
+        '}',
+        'function renderHistory(hist){',
+        '  const root=document.getElementById("events-list");',
+        '  root.innerHTML="";',
+        '  if(!hist||hist.length===0){',
+        '    const li=document.createElement("li");li.textContent="No history yet";root.appendChild(li);return;',
+        '  }',
+        '  for(const h of hist.slice(-12).reverse()){',
+        '    const li=document.createElement("li");',
+        '    li.textContent=`${h.status||""} • ${h.provider||"none"} • ${h.task||""}`;',
+        '    root.appendChild(li);',
+        '  }',
+        '}',
+        'function renderSummary(sum){',
+        '  const total=Number(sum?.total||0);',
+        '  const completed=Number(sum?.completed||0);',
+        '  const failed=Number(sum?.failed||0);',
+        '  const running=Number(sum?.running||0);',
+        '  const pending=Number(sum?.pending||0);',
+        '  document.getElementById("m-total").textContent=String(total);',
+        '  document.getElementById("m-completed").textContent=String(completed);',
+        '  document.getElementById("m-failed").textContent=String(failed);',
+        '  document.getElementById("m-running").textContent=String(running);',
+        '  document.getElementById("m-pending").textContent=String(pending);',
+        '  document.getElementById("m-eta").textContent=fmtEta(sum?.estimated_remaining_seconds);',
+        '  const pct=(total>0)?Math.floor((completed/total)*100):0;',
+        '  document.getElementById("progress-fill").style.width=`${pct}%`;',
+        '}',
+        'async function refreshState(){',
+        '  try {',
+        '    const r=await fetch("/api/state", {cache:"no-store"});',
+        '    if(!r.ok) return;',
+        '    const d=await r.json();',
+        '    latestData=d;',
+        '    document.getElementById("uptime").textContent=`Uptime: ${d.uptime_seconds}s`;',
+        '    document.getElementById("current-task").textContent=`Task: ${d.current_task||"idle"}`;',
+        '    document.getElementById("current-provider").textContent=`Provider: ${d.current_provider||"none"}`;',
+        '    renderSummary(d.run_summary||{});',
+        '    renderProviders(d.providers||[]);',
+        '    syncTaskCards(d.tasks||[]);',
+        '    renderHistory(d.history||[]);',
         '  } catch (_) {}',
         '}',
-        'setInterval(refreshState, 5000);',
+        'setInterval(refreshState, 3000);',
+        'setInterval(tickRunningDurations, 1000);',
         'refreshState();',
         '</script>',
         '</body></html>',
@@ -2049,6 +2387,14 @@ def main():
     )
     args = parser.parse_args()
 
+    # main() may be invoked multiple times in a single Python process (unit
+    # tests/import callers). Ensure stale control flags from a prior run do
+    # not short-circuit the next run.
+    _set_control_state("pause_after_task", False)
+    _set_control_state("skip_current_task", False)
+    _set_control_state("quit_requested", False)
+    _set_control_state("current_task", None)
+
     if args.command == "init":
         sys.exit(cmd_init())
     if args.command == "validate":
@@ -2093,6 +2439,15 @@ def main():
     _dashboard_server_ref = dashboard_server
     active_dashboard_port = dashboard_server.server_port if dashboard_server is not None else None
     dashboard_url = f"http://127.0.0.1:{active_dashboard_port}" if active_dashboard_port else None
+    _print_startup_banner(
+        providers=providers,
+        dashboard_url=dashboard_url,
+        require_confirmation=bool(config.get("require_manual_confirmation", True)),
+        enabled=bool(config.get("startup_banner", True)),
+    )
+    if dashboard_url:
+        # Plain stdout line keeps the URL easy to click/copy in cmd/powershell.
+        print(f"Dashboard URL: {dashboard_url}", flush=True)
     _write_pid_file(dashboard_url)
     if dashboard_url and config.get("open_dashboard_in_browser", False):
         try:
@@ -2209,6 +2564,7 @@ def main():
                 break
 
             all_pending_tasks = load_tasks(todo_path, skip_sections=args.skip_section)
+            refresh_dashboard_tasks_from_todo(todo_path)
             # resume_skip_tasks is excluded for the lifetime of this run (never
             # re-included when skipped_tasks resets below) -- those tasks are
             # simply out of scope for this invocation, not "retry later".
@@ -2290,6 +2646,7 @@ def main():
                 current_task=task,
                 current_provider=None,
                 provider_status=build_provider_status(providers, state),
+                todo_path=todo_path,
             )
 
             prompt = build_prompt(task, prompt_template)
@@ -2321,23 +2678,32 @@ def main():
                 update_dashboard_state(
                     current_provider=provider.name,
                     provider_status=build_provider_status(providers, state),
+                    todo_path=todo_path,
                 )
 
                 attempt_success = False
+                last_exit_code = None
+                last_verified = None
+                last_error_summary = None
+                last_provider_name = provider.name
                 for attempt in range(1, max_retries_per_provider + 1):
                     if _get_control_state("skip_current_task", False):
                         log("Current task was skipped by interactive command; leaving it unchecked.", color="yellow")
                         skipped_tasks.update(batch_tasks)
+                        mark_dashboard_tasks_skipped(batch_tasks, provider=provider.name)
                         task_done = True
                         _set_control_state("skip_current_task", False)
                         break
 
                     log(f"[{provider.name}] attempt {attempt}/{max_retries_per_provider}", color="dim")
+                    mark_dashboard_tasks_running(batch_tasks, provider.name, attempt)
                     attempt_prompt = (
                         build_retry_prompt(prompt, verify_failure_context)
                         if verify_failure_context else prompt
                     )
                     exit_code, output, rate_limited = provider.run(attempt_prompt, working_directory, task_timeout)
+                    last_exit_code = exit_code
+                    last_provider_name = provider.name
 
                     # rate_limited is just a substring match over the CLI's combined
                     # output -- in this repo specifically, task text and generated code
@@ -2372,15 +2738,19 @@ def main():
                         # Timed out -- we already know it didn't finish, so there's
                         # nothing meaningful to confirm. Treat it like any other
                         # failed attempt instead of asking "mark complete?".
+                        last_error_summary = f"timed out after {task_timeout if task_timeout is not None else 'configured limit'}"
                         log(f"[{provider.name}] timed out before finishing -- treating as a failed attempt.", color="bold_red")
                         continue
 
                     verified, verify_output = run_verification(config)
+                    last_verified = verified
                     # Carried into attempt_prompt on the next loop iteration (same
                     # provider, or after rotating to the next one) so the agent
                     # actually sees what broke instead of blindly repeating this
                     # attempt. Cleared once verification passes.
                     verify_failure_context = verify_output if not verified else None
+                    if not verified and verify_output:
+                        last_error_summary = verify_output.splitlines()[0][:240]
 
                     # exit_code == 0 alone isn't proof a task actually did anything --
                     # a real incident: kilo reported success on a task and had made
@@ -2388,6 +2758,7 @@ def main():
                     # than trusting it at face value, in both confirmation modes.
                     suspicious = exit_code == 0 and diff_stat.returncode == 0 and not stat_output
                     if suspicious:
+                        last_error_summary = "suspicious completion: exit 0 with no file changes"
                         log(f"[{provider.name}] SUSPICIOUS: exit code 0 but no files changed -- "
                             "this looks like a false success, not a real completion.", color="bold_red")
                         log_json("suspicious_completion", provider=provider.name, task=task)
@@ -2424,6 +2795,7 @@ def main():
                             break
                         elif answer == "skip-task":
                             skipped_tasks.update(batch_tasks)
+                            mark_dashboard_tasks_skipped(batch_tasks, provider=provider.name)
                             log(f"Task left unchecked and skipped for this cycle: {task}", color="yellow")
                             task_done = True
                             break
@@ -2449,6 +2821,15 @@ def main():
                     # window stays one sample per completed task, keeping ETA/avg/
                     # longest/shortest meaningful regardless of batch size.
                     duration = (time.time() - task_start_time) / len(batch_tasks)
+                    mark_dashboard_tasks_finished(
+                        batch_tasks,
+                        status="complete",
+                        provider=provider.name,
+                        duration_seconds=duration,
+                        exit_code=0,
+                        verification_passed=True,
+                        error_summary=None,
+                    )
                     durations = state.get("completed_task_durations", [])
                     durations.extend([duration] * len(batch_tasks))
                     state["completed_task_durations"] = durations[-200:]
@@ -2468,6 +2849,7 @@ def main():
                         current_task=None,
                         current_provider=None,
                         provider_status=build_provider_status(providers, state),
+                        todo_path=todo_path,
                         history_entry={
                             "task": task,
                             "provider": provider.name,
@@ -2480,12 +2862,23 @@ def main():
                     log(f"Providers: {print_provider_status(providers, state)}", color="blue")
                 elif provider.is_available(state):
                     # Failed for a non-rate-limit reason and user didn't want a retry -> give up on task
+                    per_task_duration = (time.time() - task_start_time) / max(1, len(batch_tasks))
+                    mark_dashboard_tasks_finished(
+                        batch_tasks,
+                        status="failed",
+                        provider=last_provider_name,
+                        duration_seconds=per_task_duration,
+                        exit_code=last_exit_code,
+                        verification_passed=last_verified,
+                        error_summary=last_error_summary,
+                    )
                     log(f"Task NOT completed: {task}", color="bold_red")
                     log_json("task_failed", task=task, provider=provider.name)
                     update_dashboard_state(
                         current_task=None,
                         current_provider=None,
                         provider_status=build_provider_status(providers, state),
+                        todo_path=todo_path,
                         history_entry={
                             "task": task,
                             "provider": provider.name,
@@ -2506,9 +2899,11 @@ def main():
                     elif on_failure == "defer":
                         for t in batch_tasks:
                             defer_task(todo_path, t)
+                        mark_dashboard_tasks_skipped(batch_tasks, provider=provider.name)
                         log(f"Task deferred to end of file: {task}", color="yellow")
                     else:  # "skip" (default)
                         skipped_tasks.update(batch_tasks)
+                        mark_dashboard_tasks_skipped(batch_tasks, provider=provider.name)
                     task_done = True  # move on to next task in Todo.md
                 else:
                     # Provider just got marked exhausted -> loop again to pick the next one immediately
@@ -2517,6 +2912,7 @@ def main():
                     provider_idx = (idx + 1) % len(providers)
                     update_dashboard_state(
                         provider_status=build_provider_status(providers, state),
+                        todo_path=todo_path,
                     )
                     log(f"Providers: {print_provider_status(providers, state)}", color="blue")
                     continue
