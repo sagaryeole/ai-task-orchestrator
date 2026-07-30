@@ -25,6 +25,7 @@ theme:
 
 nav:
   - Home: index.md
+  - Architecture: architecture.md
   - Quickstart: quickstart.md
   - Dashboard V2: dashboard-v2.md
   - Configuration Reference: configuration.md

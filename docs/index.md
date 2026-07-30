@@ -30,6 +30,7 @@ Task Orchestrator solves this by:
 ## Quick Links
 
 - [Quickstart →](quickstart.md)
+- [Architecture →](architecture.md)
 - [Dashboard V2 →](dashboard-v2.md)
 - [Configuration Reference →](configuration.md)
 - [Provider Guide →](providers.md)
