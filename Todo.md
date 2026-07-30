@@ -9,7 +9,7 @@ Tasks to make the project easier to contribute to, easier to maintain, and frien
 
 ### CLI Module — argparse and entrypoint cleanup
 
-- [ ] Move all `argparse` logic from `runner.py` (line ~2330) into `src/task_orchestrator/cli.py` so the entry point file actually owns the CLI surface. Today `cli.py` is a 21-line shim that only handles `--version`; the real parser is buried in a 2949-line god file.
+- [x] Move all `argparse` logic from `runner.py` (line ~2330) into `src/task_orchestrator/cli.py` so the entry point file actually owns the CLI surface. Today `cli.py` is a 21-line shim that only handles `--version`; the real parser is buried in a 2949-line god file.
 - [ ] Replace the current `nargs="?"` positional-command trick (`init` / `validate` as optional positional args) with real `argparse` subparsers. This gives clean `--help` output per subcommand (`task-orchestrator init --help`, `task-orchestrator run --help`) instead of a single flat help screen.
 - [ ] Add a `run` subcommand that owns all runtime flags (`--once`, `--dry-run`, `--concurrency`, `--provider`, `--task`, `--resume-from`, `--skip-section`, `--list-tasks`, `--summary`, `--json-logs`). This makes the CLI scannable: `task-orchestrator run --help` lists only run-time flags, not `init`/`validate` noise.
 - [ ] Remove the manual `if "--version" in argv` check and use `parser.add_argument("--version", action="version", ...)` instead.
