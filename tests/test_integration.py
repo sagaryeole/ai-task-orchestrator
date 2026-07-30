@@ -62,7 +62,7 @@ class TestEndToEndMockProvider(unittest.TestCase):
             with patch.object(sys, "argv", ["orchestrator.py", "run", "--config", str(cfg_path), "--once"]):
                 with patch("task_orchestrator.orchestrator.STATE_PATH", state_path):
                     with patch("task_orchestrator.orchestrator.PID_PATH", pid_path):
-                        with patch("task_orchestrator.runner.time.sleep"):
+                        with patch("task_orchestrator.orchestrator.time.sleep"):
                             main()
 
             # Verify task was marked complete
@@ -113,7 +113,7 @@ class TestEndToEndMockProvider(unittest.TestCase):
             with patch.object(sys, "argv", ["orchestrator.py", "run", "--config", str(cfg_path), "--once"]):
                 with patch("task_orchestrator.orchestrator.STATE_PATH", state_path):
                     with patch("task_orchestrator.orchestrator.PID_PATH", pid_path):
-                        with patch("task_orchestrator.runner.time.sleep"):
+                        with patch("task_orchestrator.orchestrator.time.sleep"):
                             main()
 
             final = todo.read_text()
@@ -173,7 +173,7 @@ class TestEndToEndMockProvider(unittest.TestCase):
             with patch.object(sys, "argv", ["orchestrator.py", "run", "--config", str(cfg_path), "--once"]):
                 with patch("task_orchestrator.orchestrator.STATE_PATH", state_path):
                     with patch("task_orchestrator.orchestrator.PID_PATH", pid_path):
-                        with patch("task_orchestrator.runner.time.sleep"):
+                        with patch("task_orchestrator.orchestrator.time.sleep"):
                             main()
 
             # The working provider should have run and completed the task

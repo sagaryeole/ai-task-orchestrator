@@ -46,7 +46,7 @@ Tasks to make the project easier to contribute to, easier to maintain, and frien
 - [ ] `src/task_orchestrator/provider.py` — `Provider` class, `load_providers`, `pick_next_provider`, `seconds_until_next_available`, `print_provider_status`, `_resolve_executable`, `_resolve_shell_python`, `_PYTHON_ALIASES`.
 - [x] `src/task_orchestrator/notify.py` — `notify`, `_play_audio_cue`, `_applescript_escape`, `_print_startup_banner`.
 - [x] `src/task_orchestrator/orchestrator.py` — the main loop, `run_verification`, `build_prompt`, `build_retry_prompt`, `print_summary`, `print_progress`, `print_run_report_card`, `git_commit`, `run_provider_stats`, `_process_group_cpu_percent`, `_kill_process_tree`, `_sigint_handler`, `_sigterm_handler`, `_start_keyboard_listener`, `_interactive_options`, `_control_state`.
-- [ ] Keep `runner.py` as a compatibility shim that re-exports from the new modules, so `from orchestrator import main` still works for the runtime shim. Tests should import from the new modules directly.
+- [x] Keep `runner.py` as a compatibility shim that re-exports from the new modules, so `from orchestrator import main` still works for the runtime shim. Tests should import from the new modules directly.
 
 ### Open-repo and contributor experience
 
