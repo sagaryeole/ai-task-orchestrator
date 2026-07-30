@@ -29,7 +29,7 @@
     },
     {
       "name": "copilot",
-      "enabled": true,
+      "enabled": false,
       "command": "copilot --allow-all-tools --no-ask-user -s -p {{TASK}}",
       "env": {},
       "rate_limit_patterns": ["rate limit", "429", "quota exceeded", "too many requests"],

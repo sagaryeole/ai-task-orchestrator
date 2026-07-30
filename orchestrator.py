@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""Backward-compatible shim for the package runner module."""
+"""Backward-compatible shim for the package runner module.
+
+Inserts ``src/`` onto ``sys.path``, imports :mod:`task_orchestrator.runner`,
+and replaces this module in :data:`sys.modules` so that
+``python orchestrator.py`` and the installed ``task-orchestrator`` CLI run
+identical code.  The self-replacement also means ``from orchestrator import X``
+and ``unittest.mock.patch('orchestrator.X')`` work exactly as they did when
+all code lived in this file.
+"""
 
 from __future__ import annotations
 

@@ -3,76 +3,62 @@
 Tasks for developing the orchestrator itself (`orchestrator.py`, `config.json`, prompts, docs).
 Grouped by priority — work top section first.
 
-## Dashboard V2 — Task Card UI
+## Open-Source Architecture Improvements
 
-Replace the current plain-log dashboard (`_build_html` table view) with a modern card-based task board. Still stdlib-only (no React/Vue/npm build step) — all HTML/CSS/JS inlined or served as static strings from `_build_html()`.
+Tasks to make the project easier to contribute to, easier to maintain, and friendlier to open-source contributors.
 
-### Backend — `/api/state` payload expansion
+### CLI Module — argparse and entrypoint cleanup
 
-- [x] Add a `tasks` array to the `/api/state` JSON response. Each entry: `{ "title": str, "status": "pending"|"running"|"complete"|"failed"|"skipped", "provider": str|null, "started_at": iso|null, "finished_at": iso|null, "duration_seconds": float|null, "attempt": int, "error_summary": str|null, "exit_code": int|null, "verification_passed": bool|null }`
-- [x] Populate `tasks` from the merged view of Todo.md (all `- [ ]` and `- [x]` lines) plus in-memory run history, so every task — pending, active, and finished — appears in the list
-- [x] Include a top-level `run_summary` object: `{ "total": int, "completed": int, "failed": int, "running": int, "pending": int, "elapsed_seconds": float, "estimated_remaining_seconds": float|null }`
+- [ ] Move all `argparse` logic from `runner.py` (line ~2330) into `src/task_orchestrator/cli.py` so the entry point file actually owns the CLI surface. Today `cli.py` is a 21-line shim that only handles `--version`; the real parser is buried in a 2949-line god file.
+- [ ] Replace the current `nargs="?"` positional-command trick (`init` / `validate` as optional positional args) with real `argparse` subparsers. This gives clean `--help` output per subcommand (`task-orchestrator init --help`, `task-orchestrator run --help`) instead of a single flat help screen.
+- [ ] Add a `run` subcommand that owns all runtime flags (`--once`, `--dry-run`, `--concurrency`, `--provider`, `--task`, `--resume-from`, `--skip-section`, `--list-tasks`, `--summary`, `--json-logs`). This makes the CLI scannable: `task-orchestrator run --help` lists only run-time flags, not `init`/`validate` noise.
+- [ ] Remove the manual `if "--version" in argv` check and use `parser.add_argument("--version", action="version", ...)` instead.
+- [ ] Add `src/task_orchestrator/__main__.py` that calls `cli.main()`, so `python -m task_orchestrator` works (standard Python convention).
+- [x] Keep `orchestrator.py` (repo root) as the backward-compatible shim for `python orchestrator.py`, but update `CONTRIBUTING.md` to point contributors to the package path.
 
-### Frontend — Card grid layout
+### Test imports — migrate off the root shim
 
-- [x] Render each task as a visual card (CSS grid/flexbox, 2–4 columns depending on viewport width, wrapping responsively) instead of a flat `<table>` row
-- [x] Card shows: task title (truncated to ~80 chars with `title` tooltip for full text), provider name/icon, elapsed or final duration (`mm:ss` format), and attempt count badge if > 1
-- [x] Color-code cards by status: green (`#22c55e`) background tint for complete, amber/yellow (`#f59e0b`) for running (with a subtle pulse animation), red (`#ef4444`) for failed, neutral gray (`#e5e7eb`) for pending, and slate (`#94a3b8`) for skipped
-- [x] Running card shows a live elapsed-time counter (JS `setInterval` ticking every second, driven by `started_at`)
+- [ ] Change all test imports from `from orchestrator import main` to `from task_orchestrator.orchestrator import main` (or `from task_orchestrator.cli import main` once argparse moves). This removes the tests' dependency on the repo-root `sys.modules` self-replacement hack and makes them pass in a fresh `pip install` without the root shim present.
+- [ ] Update `Makefile` lint target: remove `orchestrator.py` from `ruff check` once it is confirmed to be trivial glue and tests no longer import through it.
 
-### Frontend — Click-to-expand detail popup
+### Dashboard Module — extract from `runner.py`
 
-- [x] Clicking a card opens a modal/overlay with full task details: full task text (untruncated), provider used, start/end timestamps, duration, exit code, verification result, and error summary (if failed)
-- [x] Modal is closeable by clicking outside, pressing Escape, or clicking an × button
-- [x] Modal content is populated from the existing `/api/state` JSON — no new endpoint needed
+- [ ] Create `src/task_orchestrator/dashboard.py` and move all dashboard-specific code into it: `_dashboard_state`, `_build_html`, `DashboardHandler`, `DashboardServer`, `start_dashboard`, `update_dashboard_state`, `refresh_dashboard_tasks_from_todo`, `mark_dashboard_tasks_running/skipped/finished`, `_build_run_summary`, `_load_all_todo_tasks`, `_find_next_task_card`, `_dashboard_task_id`, `_iso_now`, and the `_CHECKBOX_TASK_RE` regex. `runner.py` should call into this module, not define it.
+- [ ] Serve static assets from `dashboard/static/` instead of inlining all CSS/JS in a Python string:
+  - Split the current inline `<style>` block into `dashboard/static/styles.css`.
+  - Split the current inline `<script>` block into `dashboard/static/app.js`.
+  - Convert `_build_html` to a minimal template with only the 2–3 dynamic fields replaced (uptime, current task, current provider), using stdlib `string.Template` (no Jinja2 dep).
+  - `DashboardHandler` should serve `/static/styles.css` and `/static/app.js` with `Cache-Control: no-cache` during development and a long max-age in production if desired.
+- [ ] Add a `dashboard/templates/index.html` file so the HTML is readable and editable by front-end contributors without opening `runner.py`.
 
-### Frontend — Header bar with run summary
+### Dashboard robustness
 
-- [x] Top-of-page summary bar showing: total tasks, completed count, failed count, running count, overall progress bar (percentage fill), wall-clock elapsed, and ETA
-- [x] Provider status chips (available / cooldown with countdown timer) rendered inline in the header, replacing the current separate provider table
+- [ ] Add a `threading.Lock` around all mutations of `_dashboard_state`. The dashboard is mutated by the orchestrator main loop and read by `DashboardHandler` in a daemon thread; today this is "safe" only because the GIL serializes dict ops, which is an accident, not a guarantee.
+- [ ] Add `/api/version` endpoint that returns the current `__version__` from `task_orchestrator.__init__`, so the dashboard can display which version is running.
+- [ ] Make `open_dashboard_in_browser` state-aware: write a small sentinel file (e.g. `.dashboard_opened`) after the first auto-open so the browser tab is not re-opened on every `run_forever.sh` restart. Current behavior is annoying when the supervisor restarts the process after a transient crash.
 
-### Frontend — Auto-refresh and live updates
+### Package architecture — split `runner.py` into focused modules
 
-- [x] Poll `/api/state` every 3 seconds (reduced from current 5s) and diff-update only changed cards (avoid full DOM rebuild on each tick to prevent flicker)
-- [x] Newly completed/failed cards get a brief highlight animation (CSS transition) so the user's eye is drawn to state changes
+`runner.py` is 2949 lines and owns config, git, state, logging, secrets, providers, subprocess lifecycle, stall detection, todo manipulation, dashboard, notifications, and the main loop. Split it into files under 400 lines each, mirroring the existing section comments:
 
-### Constraints
+- [ ] `src/task_orchestrator/config.py` — `load_config`, `validate_config`, `_interpolate_env_vars`, `_deep_merge`, `lint_config`, `GLOBAL_CONFIG_PATH`, `_INTERACTIVE_LAUNCHERS`.
+- [ ] `src/task_orchestrator/git.py` — `git_run`, `_git_dirty_count`, `validate_git_working_tree`, `_is_transient_git_error`, `_todo_lock`, and all Todo.md read/write/count helpers (`load_tasks`, `mark_complete`, `defer_task`, `count_total_tasks`, `count_completed_tasks`, `_get_section_for_line`, `_count_matching_lines`).
+- [ ] `src/task_orchestrator/provider.py` — `Provider` class, `load_providers`, `pick_next_provider`, `seconds_until_next_available`, `print_provider_status`, `_resolve_executable`, `_resolve_shell_python`, `_PYTHON_ALIASES`.
+- [ ] `src/task_orchestrator/notify.py` — `notify`, `_play_audio_cue`, `_applescript_escape`, `_print_startup_banner`.
+- [ ] `src/task_orchestrator/orchestrator.py` — the main loop, `run_verification`, `build_prompt`, `build_retry_prompt`, `print_summary`, `print_progress`, `print_run_report_card`, `git_commit`, `run_provider_stats`, `_process_group_cpu_percent`, `_kill_process_tree`, `_sigint_handler`, `_sigterm_handler`, `_start_keyboard_listener`, `_interactive_options`, `_control_state`.
+- [ ] Keep `runner.py` as a compatibility shim that re-exports from the new modules, so `from orchestrator import main` still works for the runtime shim. Tests should import from the new modules directly.
 
-- No external JS/CSS frameworks — keep the entire dashboard as a single inlined HTML string returned by `_build_html()`, same as today, so there's zero build tooling and zero extra files to serve
-- Keep the existing `/api/state` backward-compatible — new fields are additive; any external tool parsing the current shape must still work
-- Dark-mode aware: use a dark background (`#0f172a` / `#1e293b` card) with light text, consistent with the logo/demo SVG branding
+### Open-repo and contributor experience
 
-### Configuration Flexibility
+- [ ] Update `README.md` line 90 ("single-file Python you can read end-to-end") to reflect the new module structure while preserving the stdlib-only promise. Suggested replacement: "Pure Python 3 standard library, split into focused modules you can read in under 5 minutes each."
+- [ ] Add `docs/architecture.md` with a one-paragraph purpose per module and a directory-tree map, so contributors landing from the README know where new code belongs without reading 2900-line files.
+- [ ] Add a `## [Unreleased]` section at the top of `CHANGELOG.md` so contributors know where to put entry bullets.
+- [ ] Add `__main__.py` coverage to `tests/` — a smoke test that `python -m task_orchestrator --help` exits 0 and prints the banner/help.
+- [ ] Add `docs/contributing-architecture.md` (or expand `CONTRIBUTING.md`) with a concrete "where does X go?" table mapping feature areas to modules.
 
-- [~] ~~Support YAML and TOML config formats alongside JSON (auto-detect by extension), since many OSS users prefer YAML~~ (dropped: adds PyYAML dep; JSON is universal and stdlib-only)
-- [~] ~~Add `--concurrency N` flag for embarrassingly-parallel task lists (independent tasks marked with a `[parallel]` tag can run N at a time on different providers)~~ (dropped: fundamentally changes execution model; out of v2 scope)
+### Priority order
 
-### Extensibility & Plugin System
-
-- [~] ~~Define a simple plugin interface (`class BaseProvider`) with `run()`, `is_rate_limited()`, `get_stats()` methods so users can write custom providers as Python classes (not just CLI wrappers)~~ (dropped: CLI wrapping already covers any provider; over-engineering)
-- [~] ~~Support loading provider plugins from `~/.task-orchestrator/plugins/` or via entry_points (`task_orchestrator.providers` group)~~ (dropped: same as above)
-- [~] ~~Add webhook/callback hooks (`on_task_start`, `on_task_complete`, `on_task_fail`, `on_provider_exhausted`) configurable as shell commands or HTTP POST URLs — enables Slack/Discord/Teams notifications, CI integrations~~ (dropped: verify_commands already enables post-task hooks)
-- [~] ~~Support custom task parsers (not just `- [ ]` markdown) via a `task_format` config — enables integration with GitHub Issues, Jira exports, plain-text lists, CSV~~ (dropped: markdown checkboxes are universal; premature abstraction)
-
-### Robustness & Reliability
-- [~] ~~Add file-watching mode (`--watch`) that re-reads Todo.md when it changes on disk (inotify/ReadDirectoryChanges) instead of only at task boundaries — enables live task additions without restarting~~ (dropped: orchestrator re-reads between tasks; inotify adds platform complexity)
-
-### Testing & CI
-
-- [~] ~~Add `pytest` as an alternative test runner alongside unittest (many contributors prefer it)~~ (dropped: pytest can run unittest tests already; no code change needed)
-- [~] ~~Add code coverage reporting (coveralls/codecov badge in README)~~ (dropped: CI polish, not core)
-
-### Documentation & Community
-
-- [~] ~~Add ASCII art logo / banner for terminal output and README header~~ (dropped: cosmetic)
-- [~] ~~Record a 2-minute demo GIF/asciinema for the README showing a real multi-provider overnight run~~ (dropped: marketing, do manually)
-
-### Code Quality & Maintainability
-
-- [~] ~~Replace global mutable state (`_current_process`, `_dashboard_server_ref`, `_control_state`, etc.) with a `RunContext` dataclass passed through the call chain — eliminates hidden coupling and makes testing trivial~~ (dropped: v2 package already uses cleaner patterns; legacy file is frozen)
-- [~] ~~Extract the 50+ line `_build_html()` string-concatenation into a proper Jinja2-like template file (or at minimum a separate `.html` file read at startup) — the inline JS/HTML strings are unmaintainable~~ (dropped: would need Jinja2 dep or complex stdlib alternative)
-- [~] ~~Add structured logging with levels (DEBUG/INFO/WARN/ERROR) instead of the current flat `log()` with color hints — enables log filtering and integration with standard logging infrastructure~~ (dropped: current system works; stdlib logging adds unnecessary complexity for a CLI tool)
-
-### Performance & Scalability
-
-- [~] ~~Add an optional SQLite backend for state (instead of JSON) for large-scale runs with 1000+ tasks — JSON read/write on every task becomes a bottleneck~~ (dropped: adds external dep risk; JSON is fine for realistic backlogs)
+1. **Extract dashboard into `dashboard.py` + static files** — highest visibility, most painful to maintain inline, and the file is already ~400 lines of frontend mixed into orchestration logic.
+2. **Move argparse into `cli.py` with real subparsers** — low risk, high clarity win for anyone reading the entry point.
+3. **Migrate tests to package imports** — low risk, removes the `sys.modules` shim dependency in tests.
+4. **Split `runner.py` into focused modules** — biggest long-term win but most churn; do it after the first three so conflicts are minimal.

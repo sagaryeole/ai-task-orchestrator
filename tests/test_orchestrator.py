@@ -332,7 +332,7 @@ class TestDryRun(unittest.TestCase):
             state_path.write_text(json.dumps({"provider_cooldowns": {}}))
             pid_path = Path(tmpdir) / "orchestrator.pid"
 
-            with patch.object(sys, 'argv', ['orchestrator.py', '--config', str(cfg_path), '--dry-run']):
+            with patch.object(sys, 'argv', ['orchestrator.py', 'run', '--config', str(cfg_path), '--dry-run']):
                 with patch('orchestrator.log') as mock_log:
                     with patch('orchestrator.STATE_PATH', state_path):
                         with patch('orchestrator.PID_PATH', pid_path):
@@ -396,7 +396,7 @@ class TestSuspiciousCompletion(unittest.TestCase):
             sp.run(["git", "commit", "-q", "-m", "baseline"], cwd=tmpdir)
             pid_path = Path(tmpdir) / "orchestrator.pid"
 
-            with patch.object(sys, 'argv', ['orchestrator.py', '--config', str(cfg_path), '--once']):
+            with patch.object(sys, 'argv', ['orchestrator.py', 'run', '--config', str(cfg_path), '--once']):
                 with patch('orchestrator.STATE_PATH', state_path):
                     with patch('orchestrator.time.sleep'):
                         with patch('orchestrator.log') as mock_log:
@@ -438,7 +438,7 @@ class TestSuspiciousCompletion(unittest.TestCase):
             state_path.write_text(json.dumps({"provider_cooldowns": {}}))
             pid_path = Path(tmpdir) / "orchestrator.pid"
 
-            with patch.object(sys, 'argv', ['orchestrator.py', '--config', str(cfg_path), '--once']):
+            with patch.object(sys, 'argv', ['orchestrator.py', 'run', '--config', str(cfg_path), '--once']):
                 with patch('orchestrator.STATE_PATH', state_path):
                     with patch('orchestrator.time.sleep'):
                         with patch('orchestrator.log') as mock_log:
@@ -497,7 +497,7 @@ class TestRateLimitFalsePositive(unittest.TestCase):
             state_path.write_text(json.dumps({"provider_cooldowns": {}}))
             pid_path = Path(tmpdir) / "orchestrator.pid"
 
-            with patch.object(sys, 'argv', ['orchestrator.py', '--config', str(cfg_path), '--once']):
+            with patch.object(sys, 'argv', ['orchestrator.py', 'run', '--config', str(cfg_path), '--once']):
                 with patch('orchestrator.STATE_PATH', state_path):
                     with patch('orchestrator.time.sleep'):
                         with patch('orchestrator.log') as mock_log:
@@ -558,7 +558,7 @@ class TestRateLimitFalsePositive(unittest.TestCase):
             sp.run(["git", "commit", "-q", "-m", "baseline"], cwd=tmpdir)
             pid_path = Path(tmpdir) / "orchestrator.pid"
 
-            with patch.object(sys, 'argv', ['orchestrator.py', '--config', str(cfg_path), '--once']):
+            with patch.object(sys, 'argv', ['orchestrator.py', 'run', '--config', str(cfg_path), '--once']):
                 with patch('orchestrator.STATE_PATH', state_path):
                     with patch('orchestrator.time.sleep'):
                         with patch('orchestrator.log') as mock_log:
@@ -609,7 +609,7 @@ class TestTasksPerBatch(unittest.TestCase):
 
         from unittest.mock import patch
         from orchestrator import main
-        with patch.object(sys, 'argv', ['orchestrator.py', '--config', str(cfg_path), '--once']):
+        with patch.object(sys, 'argv', ['orchestrator.py', 'run', '--config', str(cfg_path), '--once']):
             with patch('orchestrator.STATE_PATH', state_path):
                 with patch('orchestrator.time.sleep'):
                     with patch('orchestrator.log') as mock_log:
@@ -685,7 +685,7 @@ class TestTasksPerBatch(unittest.TestCase):
 
             from unittest.mock import patch
             from orchestrator import main
-            with patch.object(sys, 'argv', ['orchestrator.py', '--config', str(cfg_path), '--once']):
+            with patch.object(sys, 'argv', ['orchestrator.py', 'run', '--config', str(cfg_path), '--once']):
                 with patch('orchestrator.STATE_PATH', state_path):
                     with patch('orchestrator.time.sleep'):
                         with patch('orchestrator.PID_PATH', pid_path):
@@ -843,7 +843,7 @@ class TestVerifyFailureFedBackIntoRetry(unittest.TestCase):
             state_path.write_text(json.dumps({"provider_cooldowns": {}}))
             pid_path = Path(tmpdir) / "orchestrator.pid"
 
-            with patch.object(sys, 'argv', ['orchestrator.py', '--config', str(cfg_path), '--once']):
+            with patch.object(sys, 'argv', ['orchestrator.py', 'run', '--config', str(cfg_path), '--once']):
                 with patch('orchestrator.STATE_PATH', state_path):
                     with patch('orchestrator.time.sleep'):
                         with patch('orchestrator.log'):
@@ -881,7 +881,7 @@ class TestSkipTask(unittest.TestCase):
             pid_path = Path(tmpdir) / "orchestrator.pid"
 
             inputs = ["skip-task", "y", "y"]
-            with patch.object(sys, 'argv', ['orchestrator.py', '--config', str(cfg_path)]):
+            with patch.object(sys, 'argv', ['orchestrator.py', 'run', '--config', str(cfg_path)]):
                 with patch('orchestrator.STATE_PATH', state_path):
                     with patch('builtins.input', side_effect=inputs):
                         with patch('orchestrator.time.sleep'):
@@ -1182,7 +1182,7 @@ class TestSummaryFlag(unittest.TestCase):
             )
 
             fake_stdout = io.StringIO()
-            with patch.object(sys, 'argv', ['orchestrator.py', '--config', str(cfg_path), '--summary']):
+            with patch.object(sys, 'argv', ['orchestrator.py', 'run', '--config', str(cfg_path), '--summary']):
                 with patch('orchestrator.STATE_PATH', state_path):
                     with patch('orchestrator.LOG_DIR', log_dir):
                         with patch('sys.stdout', fake_stdout):
@@ -1251,7 +1251,7 @@ class TestListTasksFlag(unittest.TestCase):
             state_path.write_text(json.dumps({"provider_cooldowns": {}}))
             pid_path = Path(tmpdir) / "orchestrator.pid"
 
-            with patch.object(sys, 'argv', ['orchestrator.py', '--config', str(cfg_path), '--list-tasks', '2']):
+            with patch.object(sys, 'argv', ['orchestrator.py', 'run', '--config', str(cfg_path), '--list-tasks', '2']):
                 with patch('orchestrator.STATE_PATH', state_path):
                     with patch('orchestrator.PID_PATH', pid_path):
                         with patch('orchestrator.log') as mock_log:
@@ -2093,7 +2093,7 @@ class TestNewCliFlags(unittest.TestCase):
             state_path.write_text(json.dumps({"provider_cooldowns": {}}))
             pid_path = Path(tmpdir) / "orchestrator.pid"
 
-            argv = ["orchestrator.py", "--config", str(cfg_path), "--dry-run"]
+            argv = ["orchestrator.py", "run", "--config", str(cfg_path), "--dry-run"]
             with patch.object(sys, "argv", argv):
                 with patch("orchestrator.STATE_PATH", state_path):
                     with patch("orchestrator.PID_PATH", pid_path):
@@ -2121,7 +2121,7 @@ class TestNewCliFlags(unittest.TestCase):
             state_path.write_text(json.dumps({"provider_cooldowns": {}}))
             pid_path = Path(tmpdir) / "orchestrator.pid"
 
-            argv = ["orchestrator.py", "--config", str(cfg_path), "--dry-run", "--provider", "p2"]
+            argv = ["orchestrator.py", "run", "--config", str(cfg_path), "--dry-run", "--provider", "p2"]
             with patch.object(sys, "argv", argv):
                 with patch("orchestrator.log") as mock_log:
                     with patch("orchestrator.STATE_PATH", state_path):
@@ -2148,7 +2148,7 @@ class TestNewCliFlags(unittest.TestCase):
             state_path.write_text(json.dumps({"provider_cooldowns": {}}))
             pid_path = Path(tmpdir) / "orchestrator.pid"
 
-            argv = ["orchestrator.py", "--config", str(cfg_path), "--dry-run", "--provider", "does-not-exist"]
+            argv = ["orchestrator.py", "run", "--config", str(cfg_path), "--dry-run", "--provider", "does-not-exist"]
             with patch.object(sys, "argv", argv):
                 with patch("orchestrator.STATE_PATH", state_path):
                     with patch("orchestrator.PID_PATH", pid_path):
@@ -2174,7 +2174,7 @@ class TestNewCliFlags(unittest.TestCase):
             state_path.write_text(json.dumps({"provider_cooldowns": {}}))
             pid_path = Path(tmpdir) / "orchestrator.pid"
 
-            argv = ["orchestrator.py", "--config", str(cfg_path), "--dry-run-prompt"]
+            argv = ["orchestrator.py", "run", "--config", str(cfg_path), "--dry-run-prompt"]
             with patch.object(sys, "argv", argv):
                 with patch("orchestrator.STATE_PATH", state_path):
                     with patch("orchestrator.PID_PATH", pid_path):
@@ -2202,7 +2202,7 @@ class TestNewCliFlags(unittest.TestCase):
             state_path.write_text(json.dumps({"provider_cooldowns": {}}))
             pid_path = Path(tmpdir) / "orchestrator.pid"
 
-            argv = ["orchestrator.py", "--config", str(cfg_path), "--once", "--resume-from", "Second"]
+            argv = ["orchestrator.py", "run", "--config", str(cfg_path), "--once", "--resume-from", "Second"]
             with patch.object(sys, "argv", argv):
                 with patch("orchestrator.log") as mock_log:
                     with patch("orchestrator.STATE_PATH", state_path):
@@ -2232,7 +2232,7 @@ class TestNewCliFlags(unittest.TestCase):
             state_path.write_text(json.dumps({"provider_cooldowns": {}}))
             pid_path = Path(tmpdir) / "orchestrator.pid"
 
-            argv = ["orchestrator.py", "--config", str(cfg_path), "--resume-from", "Nonexistent task text"]
+            argv = ["orchestrator.py", "run", "--config", str(cfg_path), "--resume-from", "Nonexistent task text"]
             with patch.object(sys, "argv", argv):
                 with patch("orchestrator.STATE_PATH", state_path):
                     with patch("orchestrator.PID_PATH", pid_path):

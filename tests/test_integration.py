@@ -59,7 +59,7 @@ class TestEndToEndMockProvider(unittest.TestCase):
             subprocess.run(["git", "add", "-A"], cwd=tmpdir)
             subprocess.run(["git", "commit", "-q", "-m", "baseline"], cwd=tmpdir)
 
-            with patch.object(sys, "argv", ["orchestrator.py", "--config", str(cfg_path), "--once"]):
+            with patch.object(sys, "argv", ["orchestrator.py", "run", "--config", str(cfg_path), "--once"]):
                 with patch("orchestrator.STATE_PATH", state_path):
                     with patch("orchestrator.PID_PATH", pid_path):
                         with patch("orchestrator.time.sleep"):
@@ -110,7 +110,7 @@ class TestEndToEndMockProvider(unittest.TestCase):
             subprocess.run(["git", "add", "-A"], cwd=tmpdir)
             subprocess.run(["git", "commit", "-q", "-m", "baseline"], cwd=tmpdir)
 
-            with patch.object(sys, "argv", ["orchestrator.py", "--config", str(cfg_path), "--once"]):
+            with patch.object(sys, "argv", ["orchestrator.py", "run", "--config", str(cfg_path), "--once"]):
                 with patch("orchestrator.STATE_PATH", state_path):
                     with patch("orchestrator.PID_PATH", pid_path):
                         with patch("orchestrator.time.sleep"):
@@ -170,7 +170,7 @@ class TestEndToEndMockProvider(unittest.TestCase):
             subprocess.run(["git", "add", "-A"], cwd=tmpdir)
             subprocess.run(["git", "commit", "-q", "-m", "baseline"], cwd=tmpdir)
 
-            with patch.object(sys, "argv", ["orchestrator.py", "--config", str(cfg_path), "--once"]):
+            with patch.object(sys, "argv", ["orchestrator.py", "run", "--config", str(cfg_path), "--once"]):
                 with patch("orchestrator.STATE_PATH", state_path):
                     with patch("orchestrator.PID_PATH", pid_path):
                         with patch("orchestrator.time.sleep"):

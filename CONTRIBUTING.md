@@ -17,16 +17,31 @@ python -m unittest discover -s tests
 
 # Run linting (optional, requires ruff)
 pip install ruff
-ruff check src/
+ruff check src/ orchestrator.py tests/
 ```
+
+> **Where to make changes:** All production code lives in the installable
+> package at `src/task_orchestrator/`. The root-level `orchestrator.py` is a
+> backward-compatible shim only — do **not** add features there. Edit the
+> appropriate module under `src/task_orchestrator/` instead.
 
 ## Architecture
 
-- **`orchestrator.py`** — a thin backward-compatible shim. It inserts `src/` onto `sys.path`, imports `task_orchestrator.runner`, and replaces itself in `sys.modules` with that module, so `python orchestrator.py` and the installed `task-orchestrator` CLI run identical code.
-- **`src/task_orchestrator/`** — the installable package:
+- **`orchestrator.py`** (repo root) — a thin backward-compatible shim. It inserts
+  `src/` onto `sys.path`, imports `task_orchestrator.runner`, and replaces itself
+  in `sys.modules` with that module so that `python orchestrator.py` and the
+  installed `task-orchestrator` CLI run identical code. **Do not add features
+  here** — it exists solely so the classic `python orchestrator.py` invocation
+  keeps working. All logic lives in the package below.
+- **`src/task_orchestrator/`** — the installable package (where you make changes):
   - `__init__.py` — package version
-  - `cli.py` — the `task-orchestrator` entry point; handles `--version` and otherwise delegates to `runner.main()`
-  - `runner.py` — everything else: config/state loading, the `Provider` class, the `init`/`validate` subcommands, the dashboard, and the main task loop
+  - `__main__.py` — enables `python -m task_orchestrator`
+  - `cli.py` — the `task-orchestrator` entry point; owns all `argparse` setup
+    (subcommands `init`, `validate`, `run`, plus flags like `--once`,
+    `--dry-run`, `--provider`, etc.) and delegates to `runner.main(args)`
+  - `runner.py` — the main task loop, `Provider` class, config/state loading,
+    git operations, todo manipulation, dashboard, notifications, and all
+    supporting helpers
 
 `runner.py` is intentionally one file rather than split into per-concern modules — the functions inside it (config loading, provider handling, git operations, logging/secret-masking, etc.) are still logically separated by the section comments (`# ---- Config / state / logging ----`, `# ---- Provider pool ----`, and so on), but there's no hard module boundary yet. A future PR splitting it into `config.py`/`provider.py`/`git.py`/etc. is a reasonable idea, not something already done — if you take that on, keep `orchestrator.py`'s shim behavior working and update this section to match.
 

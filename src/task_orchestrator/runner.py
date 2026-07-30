@@ -28,7 +28,6 @@ import sys
 import os
 import shlex
 import signal
-import argparse
 import atexit
 import datetime
 import shutil
@@ -2320,72 +2319,16 @@ def _sigterm_handler(signum, frame):
     sys.exit(0)
 
 
-def main():
+def main(args=None):
+    if args is None:
+        from .cli import main as _cli_main
+        _cli_main()
+        return
     signal.signal(signal.SIGINT, _sigint_handler)
     try:
         signal.signal(signal.SIGTERM, _sigterm_handler)
     except (ValueError, AttributeError, OSError):
         pass  # some platforms/threads don't support installing a SIGTERM handler
-
-    parser = argparse.ArgumentParser(
-        description="Task Orchestrator — drives a coding-agent CLI through a task backlog."
-    )
-    parser.add_argument(
-        "command", nargs="?", choices=["init", "validate"], default=None,
-        help="Subcommand: 'init' scaffolds a new project in the current directory; "
-             "'validate' checks config/providers/git state without running anything. "
-             "Omit to run the normal task loop."
-    )
-    parser.add_argument(
-        "--config", default=DEFAULT_CONFIG_FILENAME,
-        help=f"Path to the config file (default: {DEFAULT_CONFIG_FILENAME})"
-    )
-    parser.add_argument(
-        "--dry-run", action="store_true",
-        help="Print the next task and provider without executing anything"
-    )
-    parser.add_argument(
-        "--dry-run-prompt", action="store_true",
-        help="Print the exact prompt that would be sent for the next pending task, without executing anything."
-    )
-    parser.add_argument(
-        "--once", action="store_true",
-        help="Run only a single task and then exit"
-    )
-    parser.add_argument(
-        "--json-logs", action="store_true",
-        help="Append structured JSON log lines to logs/orchestrator.jsonl alongside normal logs"
-    )
-    parser.add_argument(
-        "--skip-section", action="append", default=[],
-        help="Exclude tasks under a Todo.md section (markdown header) from being processed. Repeatable."
-    )
-    parser.add_argument(
-        "--summary", action="store_true",
-        help="Print a summary of today's run statistics and exit"
-    )
-    parser.add_argument(
-        "--list-tasks", "--peek", dest="list_tasks", nargs="?", const=10, type=int,
-        help="Preview the next N pending tasks (default: 10) and which provider would run each."
-    )
-    parser.add_argument(
-        "--concurrency", type=int, default=1,
-        help="Run up to N tasks in parallel (only tasks tagged [parallel] are parallelized; others run sequentially)."
-    )
-    parser.add_argument(
-        "--provider", default=None,
-        help="Force a specific provider by name for this run, ignoring the others entirely (its own cooldown still applies)."
-    )
-    parser.add_argument(
-        "--task", default=None,
-        help="Run a single ad-hoc task immediately without reading or modifying Todo.md."
-    )
-    parser.add_argument(
-        "--resume-from", default=None,
-        help="Skip pending tasks in Todo.md until reaching the first one containing this text, "
-             "then proceed normally from there for the rest of this run. Todo.md itself is not modified."
-    )
-    args = parser.parse_args()
 
     # main() may be invoked multiple times in a single Python process (unit
     # tests/import callers). Ensure stale control flags from a prior run do
