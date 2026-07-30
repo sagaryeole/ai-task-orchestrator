@@ -23,7 +23,7 @@ Tasks to make the project easier to contribute to, easier to maintain, and frien
 
 ### Dashboard Module — extract from `runner.py`
 
-- [ ] Create `src/task_orchestrator/dashboard.py` and move all dashboard-specific code into it: `_dashboard_state`, `_build_html`, `DashboardHandler`, `DashboardServer`, `start_dashboard`, `update_dashboard_state`, `refresh_dashboard_tasks_from_todo`, `mark_dashboard_tasks_running/skipped/finished`, `_build_run_summary`, `_load_all_todo_tasks`, `_find_next_task_card`, `_dashboard_task_id`, `_iso_now`, and the `_CHECKBOX_TASK_RE` regex. `runner.py` should call into this module, not define it.
+- [x] Create `src/task_orchestrator/dashboard.py` and move all dashboard-specific code into it: `_dashboard_state`, `_build_html`, `DashboardHandler`, `DashboardServer`, `start_dashboard`, `update_dashboard_state`, `refresh_dashboard_tasks_from_todo`, `mark_dashboard_tasks_running/skipped/finished`, `_build_run_summary`, `_load_all_todo_tasks`, `_find_next_task_card`, `_dashboard_task_id`, `_iso_now`, and the `_CHECKBOX_TASK_RE` regex. `runner.py` should call into this module, not define it.
 - [ ] Serve static assets from `dashboard/static/` instead of inlining all CSS/JS in a Python string:
   - Split the current inline `<style>` block into `dashboard/static/styles.css`.
   - Split the current inline `<script>` block into `dashboard/static/app.js`.
