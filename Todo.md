@@ -19,7 +19,7 @@ Tasks to make the project easier to contribute to, easier to maintain, and frien
 ### Test imports — migrate off the root shim
 
 - [x] Change all test imports from `from orchestrator import main` to `from task_orchestrator.orchestrator import main` (or `from task_orchestrator.cli import main` once argparse moves). This removes the tests' dependency on the repo-root `sys.modules` self-replacement hack and makes them pass in a fresh `pip install` without the root shim present.
-- [ ] Update `Makefile` lint target: remove `orchestrator.py` from `ruff check` once it is confirmed to be trivial glue and tests no longer import through it.
+- [x] Update `Makefile` lint target: remove `orchestrator.py` from `ruff check` once it is confirmed to be trivial glue and tests no longer import through it.
 
 ### Dashboard Module — extract from `runner.py`
 

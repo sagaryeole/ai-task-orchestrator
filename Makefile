@@ -4,7 +4,7 @@ test:
 	python -m unittest discover -s tests
 
 lint:
-	ruff check src/ orchestrator.py tests/
+	ruff check src/ tests/
 
 format:
 	ruff format src/ orchestrator.py tests/
