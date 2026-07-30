@@ -17,7 +17,7 @@ class TestEndToEndMockProvider(unittest.TestCase):
 
     def test_single_task_completes_via_mock_provider(self):
         """A mock provider that touches a file should result in task marked [x]."""
-        from orchestrator import main
+        from task_orchestrator.cli import main
 
         with tempfile.TemporaryDirectory() as tmpdir:
             # Set up git repo
@@ -60,9 +60,9 @@ class TestEndToEndMockProvider(unittest.TestCase):
             subprocess.run(["git", "commit", "-q", "-m", "baseline"], cwd=tmpdir)
 
             with patch.object(sys, "argv", ["orchestrator.py", "run", "--config", str(cfg_path), "--once"]):
-                with patch("orchestrator.STATE_PATH", state_path):
-                    with patch("orchestrator.PID_PATH", pid_path):
-                        with patch("orchestrator.time.sleep"):
+                with patch("task_orchestrator.runner.STATE_PATH", state_path):
+                    with patch("task_orchestrator.runner.PID_PATH", pid_path):
+                        with patch("task_orchestrator.runner.time.sleep"):
                             main()
 
             # Verify task was marked complete
@@ -75,7 +75,7 @@ class TestEndToEndMockProvider(unittest.TestCase):
 
     def test_failing_provider_does_not_mark_complete(self):
         """A provider that exits non-zero should NOT mark the task complete."""
-        from orchestrator import main
+        from task_orchestrator.cli import main
 
         with tempfile.TemporaryDirectory() as tmpdir:
             subprocess.run(["git", "init", "-q"], cwd=tmpdir)
@@ -111,9 +111,9 @@ class TestEndToEndMockProvider(unittest.TestCase):
             subprocess.run(["git", "commit", "-q", "-m", "baseline"], cwd=tmpdir)
 
             with patch.object(sys, "argv", ["orchestrator.py", "run", "--config", str(cfg_path), "--once"]):
-                with patch("orchestrator.STATE_PATH", state_path):
-                    with patch("orchestrator.PID_PATH", pid_path):
-                        with patch("orchestrator.time.sleep"):
+                with patch("task_orchestrator.runner.STATE_PATH", state_path):
+                    with patch("task_orchestrator.runner.PID_PATH", pid_path):
+                        with patch("task_orchestrator.runner.time.sleep"):
                             main()
 
             final = todo.read_text()
@@ -123,7 +123,7 @@ class TestEndToEndMockProvider(unittest.TestCase):
     def test_rate_limited_provider_rotates(self):
         """A provider whose output matches rate_limit_patterns should be marked
         exhausted, and the orchestrator should rotate to the next provider."""
-        from orchestrator import main
+        from task_orchestrator.cli import main
 
         with tempfile.TemporaryDirectory() as tmpdir:
             subprocess.run(["git", "init", "-q"], cwd=tmpdir)
@@ -171,9 +171,9 @@ class TestEndToEndMockProvider(unittest.TestCase):
             subprocess.run(["git", "commit", "-q", "-m", "baseline"], cwd=tmpdir)
 
             with patch.object(sys, "argv", ["orchestrator.py", "run", "--config", str(cfg_path), "--once"]):
-                with patch("orchestrator.STATE_PATH", state_path):
-                    with patch("orchestrator.PID_PATH", pid_path):
-                        with patch("orchestrator.time.sleep"):
+                with patch("task_orchestrator.runner.STATE_PATH", state_path):
+                    with patch("task_orchestrator.runner.PID_PATH", pid_path):
+                        with patch("task_orchestrator.runner.time.sleep"):
                             main()
 
             # The working provider should have run and completed the task
