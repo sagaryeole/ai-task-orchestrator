@@ -30,13 +30,13 @@ def main() -> None:
         help="Check config/providers/git state without running anything",
     )
     validate_parser.add_argument(
-        "--config", default=runner.DEFAULT_CONFIG_FILENAME,
+        "--config", default=argparse.SUPPRESS,
         help=f"Path to the config file (default: {runner.DEFAULT_CONFIG_FILENAME})"
     )
 
     run_parser = subparsers.add_parser("run", help="Run the normal task loop")
     run_parser.add_argument(
-        "--config", default=runner.DEFAULT_CONFIG_FILENAME,
+        "--config", default=argparse.SUPPRESS,
         help=f"Path to the config file (default: {runner.DEFAULT_CONFIG_FILENAME})"
     )
     run_parser.add_argument(
