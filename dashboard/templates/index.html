@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Orchestrator Dashboard</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #1e293b;
+      --panel2: #0b1220;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --ok: #22c55e;
+      --warn: #f59e0b;
+      --bad: #ef4444;
+      --pending: #64748b;
+      --skipped: #94a3b8;
+      --border: #334155;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: radial-gradient(circle at 20% 0%, #1e293b 0, #0f172a 55%);
+      color: var(--text);
+      font-family: Segoe UI, Arial, sans-serif;
+    }
+
+    .wrap { padding: 20px; max-width: 1400px; margin: 0 auto; }
+
+    .top {
+      background: rgba(15,23,42,.7);
+      border: 1px solid var(--border);
+      backdrop-filter: blur(6px);
+      padding: 16px;
+      border-radius: 14px;
+      position: sticky;
+      top: 10px;
+      z-index: 10;
+    }
+
+    .title { font-size: 28px; font-weight: 700; margin: 0 0 6px 0; }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .metric {
+      background: var(--panel2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px;
+    }
+
+    .metric .k {
+      font-size: 12px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }
+
+    .metric .v {
+      font-size: 20px;
+      font-weight: 700;
+      margin-top: 3px;
+    }
+
+    .progress {
+      height: 10px;
+      border-radius: 999px;
+      background: #0b1220;
+      border: 1px solid var(--border);
+      overflow: hidden;
+      margin-top: 12px;
+    }
+
+    .progress > i {
+      display: block;
+      height: 100%;
+      background: linear-gradient(90deg, var(--ok), #14b8a6);
+      width: 0;
+    }
+
+    .providers {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
+
+    .chip {
+      font-size: 12px;
+      border-radius: 999px;
+      padding: 4px 10px;
+      border: 1px solid var(--border);
+      background: #0b1220;
+      color: var(--muted);
+    }
+
+    .chip.available { color: var(--ok); border-color: #166534; }
+    .chip.cooldown  { color: var(--warn); border-color: #92400e; }
+
+    .board {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }
+
+    .task {
+      border: 1px solid var(--border);
+      border-left-width: 5px;
+      border-radius: 12px;
+      padding: 12px;
+      background: linear-gradient(180deg, rgba(30,41,59,.95), rgba(15,23,42,.95));
+      cursor: pointer;
+      transition: transform .15s ease, border-color .2s ease, box-shadow .2s ease;
+    }
+
+    .task:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 22px rgba(0,0,0,.28);
+    }
+
+    .task .t {
+      font-weight: 650;
+      line-height: 1.35;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .task .sub {
+      margin-top: 10px;
+      font-size: 12px;
+      color: var(--muted);
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .provider-badge {
+      display: inline-block;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 2px 8px;
+      background: #0b1220;
+      color: #cbd5e1;
+      font-family: Consolas, Monaco, monospace;
+    }
+
+    .attempt-badge {
+      display: inline-block;
+      margin-left: 6px;
+      border: 1px solid #475569;
+      border-radius: 999px;
+      padding: 2px 7px;
+      color: #cbd5e1;
+      background: rgba(15,23,42,.65);
+    }
+
+    .task .status {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .07em;
+      font-weight: 700;
+      margin-top: 8px;
+    }
+
+    .task.pending        { border-left-color: var(--pending); background: linear-gradient(180deg, rgba(100,116,139,.18), rgba(15,23,42,.95)); }
+    .task.pending .status { color: #cbd5e1; }
+
+    .task.running        { border-left-color: var(--warn); background: linear-gradient(180deg, rgba(245,158,11,.20), rgba(15,23,42,.95)); animation: pulse 1.5s infinite; }
+    .task.running .status { color: #fde68a; }
+
+    .task.complete       { border-left-color: var(--ok); background: linear-gradient(180deg, rgba(34,197,94,.18), rgba(15,23,42,.95)); }
+    .task.complete .status { color: #86efac; }
+
+    .task.failed         { border-left-color: var(--bad); background: linear-gradient(180deg, rgba(239,68,68,.20), rgba(15,23,42,.95)); }
+    .task.failed .status  { color: #fecaca; }
+
+    .task.skipped        { border-left-color: var(--skipped); background: linear-gradient(180deg, rgba(148,163,184,.16), rgba(15,23,42,.95)); }
+    .task.skipped .status { color: #cbd5e1; }
+
+    @keyframes pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(245,158,11,.0); }
+      50%      { box-shadow: 0 0 0 4px rgba(245,158,11,.18); }
+    }
+
+    .events {
+      margin-top: 14px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px;
+    }
+
+    .events h3 { margin: 0 0 10px 0; font-size: 16px; }
+
+    .events-list {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .events-list li {
+      padding: 5px 0;
+      border-top: 1px solid rgba(148,163,184,.15);
+    }
+
+    .events-list li:first-child { border-top: none; }
+
+    .modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(2,6,23,.72);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 18px;
+      z-index: 30;
+    }
+
+    .modal.open { display: flex; }
+
+    .sheet {
+      width: min(760px, 96vw);
+      max-height: 86vh;
+      overflow: auto;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px;
+    }
+
+    .sheet h3 { margin: 0 0 10px 0; font-size: 20px; }
+
+    .sheet .row {
+      display: grid;
+      grid-template-columns: 180px 1fr;
+      gap: 8px;
+      font-size: 14px;
+      padding: 5px 0;
+      border-top: 1px solid rgba(148,163,184,.17);
+    }
+
+    .sheet .row:first-of-type { border-top: none; }
+
+    .close {
+      float: right;
+      background: #0b1220;
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 4px 9px;
+      cursor: pointer;
+    }
+
+    .hint { color: var(--muted); font-size: 12px; margin-top: 6px; }
+
+    @media (max-width: 640px) {
+      .wrap       { padding: 12px; }
+      .top        { top: 6px; padding: 12px; }
+      .title      { font-size: 22px; }
+      .sheet      { padding: 12px; }
+      .sheet .row { grid-template-columns: 1fr; gap: 3px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+
+    <!-- ── Top bar ── -->
+    <section class="top">
+      <h1 class="title">Orchestrator Dashboard</h1>
+      <div class="meta">
+        <span id="uptime">Uptime: ${uptime}s</span>
+        <span id="current-task">Task: ${current_task}</span>
+        <span id="current-provider">Provider: ${current_provider}</span>
+      </div>
+
+      <!-- Summary metrics -->
+      <div class="summary">
+        <div class="metric"><div class="k">Total</div><div class="v" id="m-total">0</div></div>
+        <div class="metric"><div class="k">Completed</div><div class="v" id="m-completed">0</div></div>
+        <div class="metric"><div class="k">Failed</div><div class="v" id="m-failed">0</div></div>
+        <div class="metric"><div class="k">Running</div><div class="v" id="m-running">0</div></div>
+        <div class="metric"><div class="k">Pending</div><div class="v" id="m-pending">0</div></div>
+        <div class="metric"><div class="k">ETA</div><div class="v" id="m-eta">--</div></div>
+      </div>
+
+      <!-- Progress bar -->
+      <div class="progress"><i id="progress-fill"></i></div>
+
+      <!-- Provider chips (populated by JS) -->
+      <div class="providers" id="providers-chips"></div>
+    </section>
+
+    <!-- ── Task board cards ── -->
+    <section class="board" id="task-board"></section>
+
+    <!-- ── Recent events ── -->
+    <section class="events">
+      <h3>Recent Events</h3>
+      <ul class="events-list" id="events-list">
+        ${history_items}
+      </ul>
+    </section>
+
+    <p class="hint">Click a card for full task details. Status colors: green complete, yellow running, red failed.</p>
+  </div>
+
+  <!-- ── Task detail modal ── -->
+  <div class="modal" id="task-modal">
+    <div class="sheet">
+      <button class="close" id="modal-close">&times;</button>
+      <h3 id="modal-title">Task</h3>
+      <div class="row"><strong>Status</strong><span id="modal-status"></span></div>
+      <div class="row"><strong>Provider</strong><span id="modal-provider"></span></div>
+      <div class="row"><strong>Attempt</strong><span id="modal-attempt"></span></div>
+      <div class="row"><strong>Started</strong><span id="modal-started"></span></div>
+      <div class="row"><strong>Finished</strong><span id="modal-finished"></span></div>
+      <div class="row"><strong>Duration</strong><span id="modal-duration"></span></div>
+      <div class="row"><strong>Exit Code</strong><span id="modal-exit"></span></div>
+      <div class="row"><strong>Verification</strong><span id="modal-verify"></span></div>
+      <div class="row"><strong>Error</strong><span id="modal-error"></span></div>
+    </div>
+  </div>
+
+  <!-- ── Client-side interactivity ── -->
+  <script>
+    const board = document.getElementById("task-board");
+    const modal = document.getElementById("task-modal");
+    const closeBtn = document.getElementById("modal-close");
+    let taskMap = new Map();
+    let latestData = { tasks: [] };
+
+    function esc(s) { return (s ?? "").toString(); }
+
+    function providerLabel(name) {
+      const n = esc(name) || "none";
+      const first = (n.trim()[0] || "?").toUpperCase();
+      return `[${first}] ${n}`;
+    }
+
+    function fmtDur(v) {
+      if (v === null || v === undefined || v === "") return "--";
+      const n = Math.max(0, Math.floor(Number(v)));
+      const m = Math.floor(n / 60);
+      const s = n % 60;
+      return `${m}:${String(s).padStart(2, "0")}`;
+    }
+
+    function fmtEta(v) {
+      if (v === null || v === undefined) return "--";
+      const n = Math.max(0, Math.floor(Number(v)));
+      if (n < 60) return `${n}s`;
+      const m = Math.floor(n / 60);
+      const s = n % 60;
+      if (m < 60) return `${m}m ${s}s`;
+      const h = Math.floor(m / 60);
+      const rm = m % 60;
+      return `${h}h ${rm}m`;
+    }
+
+    function openModal(task) {
+      document.getElementById("modal-title").textContent = esc(task.title);
+      document.getElementById("modal-status").textContent = esc(task.status);
+      document.getElementById("modal-provider").textContent = esc(task.provider) || "none";
+      document.getElementById("modal-attempt").textContent = String(task.attempt || 0);
+      document.getElementById("modal-started").textContent = esc(task.started_at) || "--";
+      document.getElementById("modal-finished").textContent = esc(task.finished_at) || "--";
+      document.getElementById("modal-duration").textContent = fmtDur(task.duration_seconds);
+      document.getElementById("modal-exit").textContent = (task.exit_code === null || task.exit_code === undefined) ? "--" : String(task.exit_code);
+      document.getElementById("modal-verify").textContent = (task.verification_passed === null || task.verification_passed === undefined) ? "--" : String(task.verification_passed);
+      document.getElementById("modal-error").textContent = esc(task.error_summary) || "--";
+      modal.classList.add("open");
+    }
+
+    closeBtn.addEventListener("click", () => modal.classList.remove("open"));
+    modal.addEventListener("click", (e) => { if (e.target === modal) modal.classList.remove("open"); });
+    window.addEventListener("keydown", (e) => { if (e.key === "Escape") modal.classList.remove("open"); });
+
+    function taskHash(t) {
+      return JSON.stringify([t.status, t.provider, t.started_at, t.finished_at, t.duration_seconds, t.attempt, t.exit_code, t.verification_passed, t.error_summary]);
+    }
+
+    function renderTaskCard(task) {
+      const el = document.createElement("article");
+      el.className = `task ${task.status || "pending"}`;
+      el.dataset.id = task.id;
+      el.dataset.startedAt = task.started_at || "";
+      el.dataset.status = task.status || "pending";
+      const attempts = (task.attempt && task.attempt > 1) ? `<span class="attempt-badge">attempt ${task.attempt}</span>` : "";
+      el.innerHTML = `
+        <div class="t" title="${esc(task.title)}">${esc(task.title)}</div>
+        <div class="status">${esc(task.status || "pending")}</div>
+        <div class="sub">
+          <span><span class="provider-badge">${providerLabel(task.provider)}</span>${attempts}</span>
+          <span class="dur">${fmtDur(task.duration_seconds)}</span>
+        </div>`;
+      el.addEventListener("click", () => openModal(task));
+      return el;
+    }
+
+    function syncTaskCards(tasks) {
+      const nextIds = new Set();
+      for (const t of tasks) {
+        const id = t.id || t.title;
+        nextIds.add(id);
+        const hash = taskHash(t);
+        const existing = taskMap.get(id);
+        if (!existing) {
+          const card = renderTaskCard(t);
+          card.dataset.hash = hash;
+          board.appendChild(card);
+          taskMap.set(id, card);
+          continue;
+        }
+        if (existing.dataset.hash !== hash) {
+          const card = renderTaskCard(t);
+          card.dataset.hash = hash;
+          existing.replaceWith(card);
+          taskMap.set(id, card);
+          if (t.status === "complete" || t.status === "failed") {
+            const glow = t.status === "failed" ? "rgba(239,68,68,.35)" : "rgba(34,197,94,.35)";
+            card.style.boxShadow = `0 0 0 3px ${glow}`;
+            setTimeout(() => { card.style.boxShadow = ""; }, 900);
+          }
+        }
+      }
+      for (const [id, el] of taskMap.entries()) {
+        if (!nextIds.has(id)) {
+          el.remove();
+          taskMap.delete(id);
+        }
+      }
+    }
+
+    function tickRunningDurations() {
+      const now = Date.now();
+      board.querySelectorAll(".task.running").forEach((card) => {
+        const started = card.dataset.startedAt;
+        if (!started) return;
+        const ms = Date.parse(started);
+        if (Number.isNaN(ms)) return;
+        const dur = Math.max(0, Math.floor((now - ms) / 1000));
+        const durEl = card.querySelector(".dur");
+        if (durEl) durEl.textContent = fmtDur(dur);
+      });
+    }
+
+    function renderProviders(list) {
+      const root = document.getElementById("providers-chips");
+      root.innerHTML = "";
+      const now = Date.now() / 1000;
+      for (const p of list || []) {
+        const el = document.createElement("span");
+        if (p.available) {
+          el.className = "chip available";
+          el.textContent = `available \u2022 ${p.name}`;
+        } else if (p.cooldown_until) {
+          el.className = "chip cooldown";
+          el.textContent = `cooldown \u2022 ${p.name} (${Math.max(0, Math.floor(p.cooldown_until - now))}s)`;
+        } else {
+          el.className = "chip cooldown";
+          el.textContent = `cooldown \u2022 ${p.name}`;
+        }
+        root.appendChild(el);
+      }
+    }
+
+    function renderHistory(hist) {
+      const root = document.getElementById("events-list");
+      root.innerHTML = "";
+      if (!hist || hist.length === 0) {
+        const li = document.createElement("li");
+        li.textContent = "No history yet";
+        root.appendChild(li);
+        return;
+      }
+      for (const h of hist.slice(-12).reverse()) {
+        const li = document.createElement("li");
+        li.textContent = `${h.status || ""} \u2022 ${h.provider || "none"} \u2022 ${h.task || ""}`;
+        root.appendChild(li);
+      }
+    }
+
+    function renderSummary(sum) {
+      const total = Number(sum?.total || 0);
+      const completed = Number(sum?.completed || 0);
+      const failed = Number(sum?.failed || 0);
+      const running = Number(sum?.running || 0);
+      const pending = Number(sum?.pending || 0);
+      document.getElementById("m-total").textContent = String(total);
+      document.getElementById("m-completed").textContent = String(completed);
+      document.getElementById("m-failed").textContent = String(failed);
+      document.getElementById("m-running").textContent = String(running);
+      document.getElementById("m-pending").textContent = String(pending);
+      document.getElementById("m-eta").textContent = fmtEta(sum?.estimated_remaining_seconds);
+      const pct = (total > 0) ? Math.floor((completed / total) * 100) : 0;
+      document.getElementById("progress-fill").style.width = `${pct}%`;
+    }
+
+    async function refreshState() {
+      try {
+        const r = await fetch("/api/state", { cache: "no-store" });
+        if (!r.ok) return;
+        const d = await r.json();
+        latestData = d;
+        document.getElementById("uptime").textContent = `Uptime: ${d.uptime_seconds}s`;
+        document.getElementById("current-task").textContent = `Task: ${d.current_task || "idle"}`;
+        document.getElementById("current-provider").textContent = `Provider: ${d.current_provider || "none"}`;
+        renderSummary(d.run_summary || {});
+        renderProviders(d.providers || []);
+        syncTaskCards(d.tasks || []);
+        renderHistory(d.history || []);
+      } catch (_) { /* silent */ }
+    }
+
+    setInterval(refreshState, 3000);
+    setInterval(tickRunningDurations, 1000);
+    refreshState();
+  </script>
+</body>
+</html>

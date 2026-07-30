@@ -29,7 +29,7 @@ Tasks to make the project easier to contribute to, easier to maintain, and frien
   - Split the current inline `<script>` block into `dashboard/static/app.js`.
   - Convert `_build_html` to a minimal template with only the 2–3 dynamic fields replaced (uptime, current task, current provider), using stdlib `string.Template` (no Jinja2 dep).
   - `DashboardHandler` should serve `/static/styles.css` and `/static/app.js` with `Cache-Control: no-cache` during development and a long max-age in production if desired.
-- [ ] Add a `dashboard/templates/index.html` file so the HTML is readable and editable by front-end contributors without opening `runner.py`.
+- [x] Add a `dashboard/templates/index.html` file so the HTML is readable and editable by front-end contributors without opening `runner.py`.
 
 ### Dashboard robustness
 
