@@ -173,7 +173,7 @@ class TestProviderAvailability(unittest.TestCase):
         from unittest.mock import patch
         with tempfile.TemporaryDirectory() as tmpdir:
             state_path = Path(tmpdir) / "state.json"
-            with patch('task_orchestrator.runner.STATE_PATH', state_path):
+            with patch('task_orchestrator.orchestrator.STATE_PATH', state_path):
                 p = Provider({"name": "p", "command": "echo", "env": {}, "rate_limit_patterns": []})
                 state = {"provider_cooldowns": {}}
                 p.mark_exhausted(state)
@@ -186,7 +186,7 @@ class TestExponentialBackoff(unittest.TestCase):
         from unittest.mock import patch
         with tempfile.TemporaryDirectory() as tmpdir:
             state_path = Path(tmpdir) / "state.json"
-            with patch('task_orchestrator.runner.STATE_PATH', state_path):
+            with patch('task_orchestrator.orchestrator.STATE_PATH', state_path):
                 p = Provider({"name": "p", "command": "echo", "env": {}, "rate_limit_patterns": [], "cooldown_seconds": 600})
                 state = {"provider_cooldowns": {}}
                 p.mark_exhausted(state, reason="rate_limited")
@@ -198,7 +198,7 @@ class TestExponentialBackoff(unittest.TestCase):
         from unittest.mock import patch
         with tempfile.TemporaryDirectory() as tmpdir:
             state_path = Path(tmpdir) / "state.json"
-            with patch('task_orchestrator.runner.STATE_PATH', state_path):
+            with patch('task_orchestrator.orchestrator.STATE_PATH', state_path):
                 p = Provider({"name": "p", "command": "echo", "env": {}, "rate_limit_patterns": [], "cooldown_seconds": 600})
                 state = {"provider_cooldowns": {}}
                 p.mark_exhausted(state, reason="rate_limited")
@@ -211,7 +211,7 @@ class TestExponentialBackoff(unittest.TestCase):
         from unittest.mock import patch
         with tempfile.TemporaryDirectory() as tmpdir:
             state_path = Path(tmpdir) / "state.json"
-            with patch('task_orchestrator.runner.STATE_PATH', state_path):
+            with patch('task_orchestrator.orchestrator.STATE_PATH', state_path):
                 p = Provider({"name": "p", "command": "echo", "env": {}, "rate_limit_patterns": [], "cooldown_seconds": 600})
                 state = {"provider_cooldowns": {}}
                 for _ in range(3):
@@ -224,7 +224,7 @@ class TestExponentialBackoff(unittest.TestCase):
         from unittest.mock import patch
         with tempfile.TemporaryDirectory() as tmpdir:
             state_path = Path(tmpdir) / "state.json"
-            with patch('task_orchestrator.runner.STATE_PATH', state_path):
+            with patch('task_orchestrator.orchestrator.STATE_PATH', state_path):
                 p = Provider({"name": "p", "command": "echo", "env": {}, "rate_limit_patterns": [], "cooldown_seconds": 600})
                 state = {"provider_cooldowns": {}}
                 for _ in range(10):
@@ -237,7 +237,7 @@ class TestExponentialBackoff(unittest.TestCase):
         from unittest.mock import patch
         with tempfile.TemporaryDirectory() as tmpdir:
             state_path = Path(tmpdir) / "state.json"
-            with patch('task_orchestrator.runner.STATE_PATH', state_path):
+            with patch('task_orchestrator.orchestrator.STATE_PATH', state_path):
                 p = Provider({"name": "p", "command": "echo", "env": {}, "rate_limit_patterns": [], "cooldown_seconds": 600})
                 state = {"provider_cooldowns": {}}
                 p.mark_exhausted(state, reason="rate_limited")
@@ -252,7 +252,7 @@ class TestExponentialBackoff(unittest.TestCase):
         from unittest.mock import patch
         with tempfile.TemporaryDirectory() as tmpdir:
             state_path = Path(tmpdir) / "state.json"
-            with patch('task_orchestrator.runner.STATE_PATH', state_path):
+            with patch('task_orchestrator.orchestrator.STATE_PATH', state_path):
                 p = Provider({"name": "p", "command": "echo", "env": {}, "rate_limit_patterns": [], "cooldown_seconds": 600})
                 state = {"provider_cooldowns": {}}
                 p.mark_exhausted(state, reason="rate_limited")
@@ -265,7 +265,7 @@ class TestExponentialBackoff(unittest.TestCase):
         from unittest.mock import patch
         with tempfile.TemporaryDirectory() as tmpdir:
             state_path = Path(tmpdir) / "state.json"
-            with patch('task_orchestrator.runner.STATE_PATH', state_path):
+            with patch('task_orchestrator.orchestrator.STATE_PATH', state_path):
                 p = Provider({"name": "p", "command": "echo", "env": {}, "rate_limit_patterns": [], "cooldown_seconds": 600})
                 state = {"provider_cooldowns": {}}
                 p.mark_exhausted(state, reason="rate_limited")
@@ -333,9 +333,9 @@ class TestDryRun(unittest.TestCase):
             pid_path = Path(tmpdir) / "orchestrator.pid"
 
             with patch.object(sys, 'argv', ['orchestrator.py', 'run', '--config', str(cfg_path), '--dry-run']):
-                with patch('task_orchestrator.runner.log') as mock_log:
-                    with patch('task_orchestrator.runner.STATE_PATH', state_path):
-                        with patch('task_orchestrator.runner.PID_PATH', pid_path):
+                with patch('task_orchestrator.orchestrator.log') as mock_log:
+                    with patch('task_orchestrator.orchestrator.STATE_PATH', state_path):
+                        with patch('task_orchestrator.orchestrator.PID_PATH', pid_path):
                             main()
             log_output = ' '.join(str(call.args[0]) for call in mock_log.call_args_list)
             self.assertIn("Dry-run", log_output)
@@ -397,10 +397,10 @@ class TestSuspiciousCompletion(unittest.TestCase):
             pid_path = Path(tmpdir) / "orchestrator.pid"
 
             with patch.object(sys, 'argv', ['orchestrator.py', 'run', '--config', str(cfg_path), '--once']):
-                with patch('task_orchestrator.runner.STATE_PATH', state_path):
+                with patch('task_orchestrator.orchestrator.STATE_PATH', state_path):
                     with patch('task_orchestrator.runner.time.sleep'):
-                        with patch('task_orchestrator.runner.log') as mock_log:
-                            with patch('task_orchestrator.runner.PID_PATH', pid_path):
+                        with patch('task_orchestrator.orchestrator.log') as mock_log:
+                            with patch('task_orchestrator.orchestrator.PID_PATH', pid_path):
                                 main()
 
             log_output = ' '.join(str(call.args[0]) for call in mock_log.call_args_list)
@@ -439,10 +439,10 @@ class TestSuspiciousCompletion(unittest.TestCase):
             pid_path = Path(tmpdir) / "orchestrator.pid"
 
             with patch.object(sys, 'argv', ['orchestrator.py', 'run', '--config', str(cfg_path), '--once']):
-                with patch('task_orchestrator.runner.STATE_PATH', state_path):
+                with patch('task_orchestrator.orchestrator.STATE_PATH', state_path):
                     with patch('task_orchestrator.runner.time.sleep'):
-                        with patch('task_orchestrator.runner.log') as mock_log:
-                            with patch('task_orchestrator.runner.PID_PATH', pid_path):
+                        with patch('task_orchestrator.orchestrator.log') as mock_log:
+                            with patch('task_orchestrator.orchestrator.PID_PATH', pid_path):
                                 main()
 
             log_output = ' '.join(str(call.args[0]) for call in mock_log.call_args_list)
@@ -498,10 +498,10 @@ class TestRateLimitFalsePositive(unittest.TestCase):
             pid_path = Path(tmpdir) / "orchestrator.pid"
 
             with patch.object(sys, 'argv', ['orchestrator.py', 'run', '--config', str(cfg_path), '--once']):
-                with patch('task_orchestrator.runner.STATE_PATH', state_path):
+                with patch('task_orchestrator.orchestrator.STATE_PATH', state_path):
                     with patch('task_orchestrator.runner.time.sleep'):
-                        with patch('task_orchestrator.runner.log') as mock_log:
-                            with patch('task_orchestrator.runner.PID_PATH', pid_path):
+                        with patch('task_orchestrator.orchestrator.log') as mock_log:
+                            with patch('task_orchestrator.orchestrator.PID_PATH', pid_path):
                                 main()
 
             log_output = ' '.join(str(call.args[0]) for call in mock_log.call_args_list)
@@ -559,10 +559,10 @@ class TestRateLimitFalsePositive(unittest.TestCase):
             pid_path = Path(tmpdir) / "orchestrator.pid"
 
             with patch.object(sys, 'argv', ['orchestrator.py', 'run', '--config', str(cfg_path), '--once']):
-                with patch('task_orchestrator.runner.STATE_PATH', state_path):
+                with patch('task_orchestrator.orchestrator.STATE_PATH', state_path):
                     with patch('task_orchestrator.runner.time.sleep'):
-                        with patch('task_orchestrator.runner.log') as mock_log:
-                            with patch('task_orchestrator.runner.PID_PATH', pid_path):
+                        with patch('task_orchestrator.orchestrator.log') as mock_log:
+                            with patch('task_orchestrator.orchestrator.PID_PATH', pid_path):
                                 main()
 
             log_output = ' '.join(str(call.args[0]) for call in mock_log.call_args_list)
@@ -610,10 +610,10 @@ class TestTasksPerBatch(unittest.TestCase):
         from unittest.mock import patch
         from task_orchestrator.cli import main
         with patch.object(sys, 'argv', ['orchestrator.py', 'run', '--config', str(cfg_path), '--once']):
-            with patch('task_orchestrator.runner.STATE_PATH', state_path):
+            with patch('task_orchestrator.orchestrator.STATE_PATH', state_path):
                 with patch('task_orchestrator.runner.time.sleep'):
-                    with patch('task_orchestrator.runner.log') as mock_log:
-                        with patch('task_orchestrator.runner.PID_PATH', pid_path):
+                    with patch('task_orchestrator.orchestrator.log') as mock_log:
+                        with patch('task_orchestrator.orchestrator.PID_PATH', pid_path):
                             main()
 
         log_output = ' '.join(str(call.args[0]) for call in mock_log.call_args_list)
@@ -686,9 +686,9 @@ class TestTasksPerBatch(unittest.TestCase):
             from unittest.mock import patch
             from task_orchestrator.cli import main
             with patch.object(sys, 'argv', ['orchestrator.py', 'run', '--config', str(cfg_path), '--once']):
-                with patch('task_orchestrator.runner.STATE_PATH', state_path):
+                with patch('task_orchestrator.orchestrator.STATE_PATH', state_path):
                     with patch('task_orchestrator.runner.time.sleep'):
-                        with patch('task_orchestrator.runner.PID_PATH', pid_path):
+                        with patch('task_orchestrator.orchestrator.PID_PATH', pid_path):
                             main()
 
             final_text = todo.read_text()
@@ -727,7 +727,7 @@ class TestVerifyLiveOutput(unittest.TestCase):
         fail_cmd = "python -c \"import sys; sys.exit(1)\""
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch('sys.stderr', new=io.StringIO()) as fake_err:
-                with patch('task_orchestrator.runner.log') as mock_log:
+                with patch('task_orchestrator.orchestrator.log') as mock_log:
                     run_verification({"verify_commands": [fail_cmd], "working_directory": tmpdir})
                 stderr_output = fake_err.getvalue()
                 self.assertIn("Verification FAILED", stderr_output)
@@ -744,8 +744,8 @@ class TestVerifyLiveOutput(unittest.TestCase):
         # legitimately contains the command's own source text".
         fail_cmd = "python -c \"import sys; print('verbose ' + 'buildlog xyz'); sys.exit(1)\""
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('task_orchestrator.runner.log_file_only') as mock_file_only:
-                with patch('task_orchestrator.runner.log') as mock_log:
+            with patch('task_orchestrator.orchestrator.log_file_only') as mock_file_only:
+                with patch('task_orchestrator.orchestrator.log') as mock_log:
                     result, failure_output = run_verification({"verify_commands": [fail_cmd], "working_directory": tmpdir})
             self.assertFalse(result)
             self.assertIn("verbose buildlog xyz", failure_output)
@@ -757,8 +757,8 @@ class TestVerifyLiveOutput(unittest.TestCase):
     def test_verify_success_does_not_write_to_file_only(self):
         from unittest.mock import patch
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('task_orchestrator.runner.log_file_only') as mock_file_only:
-                with patch('task_orchestrator.runner.log'):
+            with patch('task_orchestrator.orchestrator.log_file_only') as mock_file_only:
+                with patch('task_orchestrator.orchestrator.log'):
                     result, failure_output = run_verification({"verify_commands": ["python -c \"pass\""], "working_directory": tmpdir})
             self.assertTrue(result)
             self.assertIsNone(failure_output)
@@ -767,7 +767,7 @@ class TestVerifyLiveOutput(unittest.TestCase):
     def test_verify_timeout_treated_as_failure(self):
         from unittest.mock import patch
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('task_orchestrator.runner.log') as mock_log:
+            with patch('task_orchestrator.orchestrator.log') as mock_log:
                 result, failure_output = run_verification({
                     "verify_commands": ["python -c \"import time; time.sleep(5)\""],
                     "working_directory": tmpdir,
@@ -844,10 +844,10 @@ class TestVerifyFailureFedBackIntoRetry(unittest.TestCase):
             pid_path = Path(tmpdir) / "orchestrator.pid"
 
             with patch.object(sys, 'argv', ['orchestrator.py', 'run', '--config', str(cfg_path), '--once']):
-                with patch('task_orchestrator.runner.STATE_PATH', state_path):
+                with patch('task_orchestrator.orchestrator.STATE_PATH', state_path):
                     with patch('task_orchestrator.runner.time.sleep'):
-                        with patch('task_orchestrator.runner.log'):
-                            with patch('task_orchestrator.runner.PID_PATH', pid_path):
+                        with patch('task_orchestrator.orchestrator.log'):
+                            with patch('task_orchestrator.orchestrator.PID_PATH', pid_path):
                                 main()
 
             attempts = prompt_log.read_text().split("===ATTEMPT===\n")[1:]
@@ -882,11 +882,11 @@ class TestSkipTask(unittest.TestCase):
 
             inputs = ["skip-task", "y", "y"]
             with patch.object(sys, 'argv', ['orchestrator.py', 'run', '--config', str(cfg_path)]):
-                with patch('task_orchestrator.runner.STATE_PATH', state_path):
+                with patch('task_orchestrator.orchestrator.STATE_PATH', state_path):
                     with patch('builtins.input', side_effect=inputs):
                         with patch('task_orchestrator.runner.time.sleep'):
-                            with patch('task_orchestrator.runner.log') as mock_log:
-                                with patch('task_orchestrator.runner.PID_PATH', pid_path):
+                            with patch('task_orchestrator.orchestrator.log') as mock_log:
+                                with patch('task_orchestrator.orchestrator.PID_PATH', pid_path):
                                     main()
             log_output = ' '.join(str(call.args[0]) for call in mock_log.call_args_list)
             self.assertIn("skipped for this cycle", log_output)
@@ -898,7 +898,7 @@ class TestSkipTask(unittest.TestCase):
 class TestLintConfig(unittest.TestCase):
     def _run_lint(self, cfg):
         from unittest.mock import patch
-        with patch('task_orchestrator.runner.log') as mock_log:
+        with patch('task_orchestrator.orchestrator.log') as mock_log:
             lint_config(cfg)
         return ' '.join(str(call.args[0]) for call in mock_log.call_args_list)
 
@@ -1000,7 +1000,7 @@ class TestLintTodo(unittest.TestCase):
             f.write(content)
             path = f.name
         try:
-            with patch('task_orchestrator.runner.log') as mock_log:
+            with patch('task_orchestrator.orchestrator.log') as mock_log:
                 lint_todo(Path(path))
             return ' '.join(str(call.args[0]) for call in mock_log.call_args_list)
         finally:
@@ -1022,7 +1022,7 @@ class TestLintTodo(unittest.TestCase):
 
     def test_no_warn_on_missing_file(self):
         from unittest.mock import patch
-        with patch('task_orchestrator.runner.log') as mock_log:
+        with patch('task_orchestrator.orchestrator.log') as mock_log:
             lint_todo(Path("/nonexistent/path/Todo.md"))
         self.assertEqual(mock_log.call_count, 0)
 
@@ -1125,7 +1125,7 @@ class TestPrintSummary(unittest.TestCase):
             state = {"completed_task_durations": [60.0, 120.0]}
             fake_stdout = io.StringIO()
             with patch('sys.stdout', fake_stdout):
-                with patch('task_orchestrator.runner.LOG_DIR', log_dir):
+                with patch('task_orchestrator.orchestrator.LOG_DIR', log_dir):
                     print_summary(state, todo, log_path=log_file)
             output = fake_stdout.getvalue()
             self.assertIn("Tasks completed today: 1", output)
@@ -1148,7 +1148,7 @@ class TestPrintSummary(unittest.TestCase):
             state = {"completed_task_durations": []}
             fake_stdout = io.StringIO()
             with patch('sys.stdout', fake_stdout):
-                with patch('task_orchestrator.runner.LOG_DIR', log_dir):
+                with patch('task_orchestrator.orchestrator.LOG_DIR', log_dir):
                     print_summary(state, todo, log_path=log_file)
             output = fake_stdout.getvalue()
             self.assertIn("Tasks completed today: 0", output)
@@ -1183,8 +1183,8 @@ class TestSummaryFlag(unittest.TestCase):
 
             fake_stdout = io.StringIO()
             with patch.object(sys, 'argv', ['orchestrator.py', 'run', '--config', str(cfg_path), '--summary']):
-                with patch('task_orchestrator.runner.STATE_PATH', state_path):
-                    with patch('task_orchestrator.runner.LOG_DIR', log_dir):
+                with patch('task_orchestrator.orchestrator.STATE_PATH', state_path):
+                    with patch('task_orchestrator.orchestrator.LOG_DIR', log_dir):
                         with patch('sys.stdout', fake_stdout):
                             main()
             output = fake_stdout.getvalue()
@@ -1209,7 +1209,7 @@ class TestSummaryEnhancements(unittest.TestCase):
             state = {"completed_task_durations": [10.0, 20.0]}
             fake_stdout = io.StringIO()
             with patch('sys.stdout', fake_stdout):
-                with patch('task_orchestrator.runner.LOG_DIR', log_dir):
+                with patch('task_orchestrator.orchestrator.LOG_DIR', log_dir):
                     print_summary(state, todo, log_path=log_file)
             output = fake_stdout.getvalue()
             self.assertIn("Current success streak:", output)
@@ -1252,9 +1252,9 @@ class TestListTasksFlag(unittest.TestCase):
             pid_path = Path(tmpdir) / "orchestrator.pid"
 
             with patch.object(sys, 'argv', ['orchestrator.py', 'run', '--config', str(cfg_path), '--list-tasks', '2']):
-                with patch('task_orchestrator.runner.STATE_PATH', state_path):
-                    with patch('task_orchestrator.runner.PID_PATH', pid_path):
-                        with patch('task_orchestrator.runner.log') as mock_log:
+                with patch('task_orchestrator.orchestrator.STATE_PATH', state_path):
+                    with patch('task_orchestrator.orchestrator.PID_PATH', pid_path):
+                        with patch('task_orchestrator.orchestrator.log') as mock_log:
                             main()
             joined = " ".join(str(c.args[0]) for c in mock_log.call_args_list)
             self.assertIn("Next 2 pending tasks", joined)
@@ -1296,7 +1296,7 @@ class TestProviderStats(unittest.TestCase):
             "rate_limit_patterns": [],
             "stats_command": "echo '{\"tokens\": 100}'",
         }
-        with patch('task_orchestrator.runner.log_json') as mock_json:
+        with patch('task_orchestrator.orchestrator.log_json') as mock_json:
             p = Provider(cfg)
             run_provider_stats(p, ".", "Test task")
         logged = [str(c.args[0]) for c in mock_json.call_args_list]
@@ -1310,7 +1310,7 @@ class TestProviderStats(unittest.TestCase):
             "env": {},
             "rate_limit_patterns": [],
         }
-        with patch('task_orchestrator.runner.log') as mock_log:
+        with patch('task_orchestrator.orchestrator.log') as mock_log:
             p = Provider(cfg)
             run_provider_stats(p, ".", "Test task")
         self.assertEqual(mock_log.call_count, 0)
@@ -1324,8 +1324,8 @@ class TestProviderStats(unittest.TestCase):
             "rate_limit_patterns": [],
             "stats_command": "/nonexistent/stats-binary",
         }
-        with patch('task_orchestrator.runner.log') as mock_log:
-            with patch('task_orchestrator.runner.log_json') as mock_json:
+        with patch('task_orchestrator.orchestrator.log') as mock_log:
+            with patch('task_orchestrator.orchestrator.log_json') as mock_json:
                 p = Provider(cfg)
                 run_provider_stats(p, ".", "Test task")
         log_msgs = [str(c.args[0]) for c in mock_log.call_args_list]
@@ -1347,8 +1347,8 @@ class TestProviderStats(unittest.TestCase):
             "rate_limit_patterns": [],
             "stats_command": "stats-binary",
         }
-        with patch('task_orchestrator.runner.log') as mock_log:
-            with patch('task_orchestrator.runner.log_json') as mock_json:
+        with patch('task_orchestrator.orchestrator.log') as mock_log:
+            with patch('task_orchestrator.orchestrator.log_json') as mock_json:
                 with patch('task_orchestrator.runner.subprocess.run', side_effect=subprocess.TimeoutExpired(cmd="stats-binary", timeout=30)):
                     p = Provider(cfg)
                     run_provider_stats(p, ".", "Test task")
@@ -1364,7 +1364,7 @@ class TestProviderStats(unittest.TestCase):
             "rate_limit_patterns": [],
             "stats_command": "python -c \"import json; print(json.dumps({'tokens': 50, 'cost': 0.01}))\"",
         }
-        with patch('task_orchestrator.runner.log_json') as mock_json:
+        with patch('task_orchestrator.orchestrator.log_json') as mock_json:
             p = Provider(cfg)
             run_provider_stats(p, ".", "Test task")
         args_list = [c.args for c in mock_json.call_args_list]
@@ -1998,7 +1998,7 @@ class TestGlobalConfigMerge(unittest.TestCase):
                 "providers": [{"name": "project-p", "command": "echo hi", "env": {}, "rate_limit_patterns": []}],
             }))
 
-            with patch("task_orchestrator.runner.GLOBAL_CONFIG_PATH", global_cfg_path):
+            with patch("task_orchestrator.orchestrator.GLOBAL_CONFIG_PATH", global_cfg_path):
                 config = load_config(project_cfg_path)
 
         self.assertEqual(config["delay_seconds"], 999)  # only in global -> inherited
@@ -2013,7 +2013,7 @@ class TestGlobalConfigMerge(unittest.TestCase):
                 "todo_file": "Todo.md",
                 "providers": [{"name": "p", "command": "echo hi", "env": {}, "rate_limit_patterns": []}],
             }))
-            with patch("task_orchestrator.runner.GLOBAL_CONFIG_PATH", missing_global):
+            with patch("task_orchestrator.orchestrator.GLOBAL_CONFIG_PATH", missing_global):
                 config = load_config(project_cfg_path)
         self.assertEqual(config["providers"][0]["name"], "p")
 
@@ -2053,7 +2053,7 @@ class TestSecretMasking(unittest.TestCase):
         })
         _register_secrets([provider])
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch("task_orchestrator.runner.LOG_DIR", Path(tmpdir)):
+            with patch("task_orchestrator.orchestrator.LOG_DIR", Path(tmpdir)):
                 from task_orchestrator.runner import log
                 log("leaked value: shh-dont-tell")
                 logged = (Path(tmpdir) / "orchestrator.log").read_text()
@@ -2066,7 +2066,7 @@ class TestAtomicStateWrite(unittest.TestCase):
         from unittest.mock import patch
         with tempfile.TemporaryDirectory() as tmpdir:
             state_path = Path(tmpdir) / "state.json"
-            with patch("task_orchestrator.runner.STATE_PATH", state_path):
+            with patch("task_orchestrator.orchestrator.STATE_PATH", state_path):
                 save_state({"provider_cooldowns": {"p": 123}})
             self.assertTrue(state_path.exists())
             self.assertEqual(json.loads(state_path.read_text())["provider_cooldowns"]["p"], 123)
@@ -2078,7 +2078,7 @@ class TestAtomicStateWrite(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             state_path = Path(tmpdir) / "state.json"
             state_path.write_text(json.dumps({"provider_cooldowns": {"old": 1}}))
-            with patch("task_orchestrator.runner.STATE_PATH", state_path):
+            with patch("task_orchestrator.orchestrator.STATE_PATH", state_path):
                 save_state({"provider_cooldowns": {"new": 2}})
             data = json.loads(state_path.read_text())
         self.assertEqual(data["provider_cooldowns"], {"new": 2})
@@ -2111,8 +2111,8 @@ class TestNewCliFlags(unittest.TestCase):
 
             argv = ["orchestrator.py", "run", "--config", str(cfg_path), "--dry-run"]
             with patch.object(sys, "argv", argv):
-                with patch("task_orchestrator.runner.STATE_PATH", state_path):
-                    with patch("task_orchestrator.runner.PID_PATH", pid_path):
+                with patch("task_orchestrator.orchestrator.STATE_PATH", state_path):
+                    with patch("task_orchestrator.orchestrator.PID_PATH", pid_path):
                         with patch("sys.stdout", new_callable=io.StringIO) as fake_stdout:
                             main()
             out = fake_stdout.getvalue()
@@ -2139,9 +2139,9 @@ class TestNewCliFlags(unittest.TestCase):
 
             argv = ["orchestrator.py", "run", "--config", str(cfg_path), "--dry-run", "--provider", "p2"]
             with patch.object(sys, "argv", argv):
-                with patch("task_orchestrator.runner.log") as mock_log:
-                    with patch("task_orchestrator.runner.STATE_PATH", state_path):
-                        with patch("task_orchestrator.runner.PID_PATH", pid_path):
+                with patch("task_orchestrator.orchestrator.log") as mock_log:
+                    with patch("task_orchestrator.orchestrator.STATE_PATH", state_path):
+                        with patch("task_orchestrator.orchestrator.PID_PATH", pid_path):
                             main()
             log_output = " ".join(str(call.args[0]) for call in mock_log.call_args_list)
             self.assertIn("Forcing provider: p2", log_output)
@@ -2166,8 +2166,8 @@ class TestNewCliFlags(unittest.TestCase):
 
             argv = ["orchestrator.py", "run", "--config", str(cfg_path), "--dry-run", "--provider", "does-not-exist"]
             with patch.object(sys, "argv", argv):
-                with patch("task_orchestrator.runner.STATE_PATH", state_path):
-                    with patch("task_orchestrator.runner.PID_PATH", pid_path):
+                with patch("task_orchestrator.orchestrator.STATE_PATH", state_path):
+                    with patch("task_orchestrator.orchestrator.PID_PATH", pid_path):
                         with self.assertRaises(SystemExit):
                             main()
 
@@ -2192,8 +2192,8 @@ class TestNewCliFlags(unittest.TestCase):
 
             argv = ["orchestrator.py", "run", "--config", str(cfg_path), "--dry-run-prompt"]
             with patch.object(sys, "argv", argv):
-                with patch("task_orchestrator.runner.STATE_PATH", state_path):
-                    with patch("task_orchestrator.runner.PID_PATH", pid_path):
+                with patch("task_orchestrator.orchestrator.STATE_PATH", state_path):
+                    with patch("task_orchestrator.orchestrator.PID_PATH", pid_path):
                         with patch("sys.stdout", new_callable=io.StringIO) as fake_stdout:
                             main()
             self.assertIn("Do this: Build the widget", fake_stdout.getvalue())
@@ -2220,9 +2220,9 @@ class TestNewCliFlags(unittest.TestCase):
 
             argv = ["orchestrator.py", "run", "--config", str(cfg_path), "--once", "--resume-from", "Second"]
             with patch.object(sys, "argv", argv):
-                with patch("task_orchestrator.runner.log") as mock_log:
-                    with patch("task_orchestrator.runner.STATE_PATH", state_path):
-                        with patch("task_orchestrator.runner.PID_PATH", pid_path):
+                with patch("task_orchestrator.orchestrator.log") as mock_log:
+                    with patch("task_orchestrator.orchestrator.STATE_PATH", state_path):
+                        with patch("task_orchestrator.orchestrator.PID_PATH", pid_path):
                             main()
 
             log_output = " ".join(str(call.args[0]) for call in mock_log.call_args_list)
@@ -2250,8 +2250,8 @@ class TestNewCliFlags(unittest.TestCase):
 
             argv = ["orchestrator.py", "run", "--config", str(cfg_path), "--resume-from", "Nonexistent task text"]
             with patch.object(sys, "argv", argv):
-                with patch("task_orchestrator.runner.STATE_PATH", state_path):
-                    with patch("task_orchestrator.runner.PID_PATH", pid_path):
+                with patch("task_orchestrator.orchestrator.STATE_PATH", state_path):
+                    with patch("task_orchestrator.orchestrator.PID_PATH", pid_path):
                         with self.assertRaises(SystemExit):
                             main()
 
@@ -2263,11 +2263,11 @@ class TestSigtermHandler(unittest.TestCase):
         # the module-global _control_state["quit_requested"] permanently for
         # the rest of the test run, breaking every later test that calls
         # main() and checks that flag at the top of its loop.
-        with patch("task_orchestrator.runner._kill_process_tree") as mock_kill:
-            with patch("task_orchestrator.runner._shutdown_dashboard_server") as mock_shutdown:
-                with patch("task_orchestrator.runner._remove_pid_file") as mock_remove_pid:
-                    with patch("task_orchestrator.runner._set_control_state") as mock_set_control:
-                        with patch("task_orchestrator.runner._current_process", None):
+        with patch("task_orchestrator.orchestrator._kill_process_tree") as mock_kill:
+            with patch("task_orchestrator.orchestrator._shutdown_dashboard_server") as mock_shutdown:
+                with patch("task_orchestrator.orchestrator._remove_pid_file") as mock_remove_pid:
+                    with patch("task_orchestrator.orchestrator._set_control_state") as mock_set_control:
+                        with patch("task_orchestrator.orchestrator._current_process", None):
                             with self.assertRaises(SystemExit) as ctx:
                                 _sigterm_handler(15, None)
         self.assertEqual(ctx.exception.code, 0)

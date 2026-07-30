@@ -282,7 +282,7 @@ def start_dashboard(port, retry_on_port_in_use=False, max_attempts=20):
     if not isinstance(port, int) or port <= 0:
         return None
 
-    from .runner import log
+    from .orchestrator import log
     attempts = max_attempts if retry_on_port_in_use else 1
     active_port = port
     for _ in range(attempts):

@@ -60,8 +60,8 @@ class TestEndToEndMockProvider(unittest.TestCase):
             subprocess.run(["git", "commit", "-q", "-m", "baseline"], cwd=tmpdir)
 
             with patch.object(sys, "argv", ["orchestrator.py", "run", "--config", str(cfg_path), "--once"]):
-                with patch("task_orchestrator.runner.STATE_PATH", state_path):
-                    with patch("task_orchestrator.runner.PID_PATH", pid_path):
+                with patch("task_orchestrator.orchestrator.STATE_PATH", state_path):
+                    with patch("task_orchestrator.orchestrator.PID_PATH", pid_path):
                         with patch("task_orchestrator.runner.time.sleep"):
                             main()
 
@@ -111,8 +111,8 @@ class TestEndToEndMockProvider(unittest.TestCase):
             subprocess.run(["git", "commit", "-q", "-m", "baseline"], cwd=tmpdir)
 
             with patch.object(sys, "argv", ["orchestrator.py", "run", "--config", str(cfg_path), "--once"]):
-                with patch("task_orchestrator.runner.STATE_PATH", state_path):
-                    with patch("task_orchestrator.runner.PID_PATH", pid_path):
+                with patch("task_orchestrator.orchestrator.STATE_PATH", state_path):
+                    with patch("task_orchestrator.orchestrator.PID_PATH", pid_path):
                         with patch("task_orchestrator.runner.time.sleep"):
                             main()
 
@@ -171,8 +171,8 @@ class TestEndToEndMockProvider(unittest.TestCase):
             subprocess.run(["git", "commit", "-q", "-m", "baseline"], cwd=tmpdir)
 
             with patch.object(sys, "argv", ["orchestrator.py", "run", "--config", str(cfg_path), "--once"]):
-                with patch("task_orchestrator.runner.STATE_PATH", state_path):
-                    with patch("task_orchestrator.runner.PID_PATH", pid_path):
+                with patch("task_orchestrator.orchestrator.STATE_PATH", state_path):
+                    with patch("task_orchestrator.orchestrator.PID_PATH", pid_path):
                         with patch("task_orchestrator.runner.time.sleep"):
                             main()
 
