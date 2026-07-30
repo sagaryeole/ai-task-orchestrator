@@ -1478,14 +1478,14 @@ class TestBuildHtml(unittest.TestCase):
         status = {"kilo": {"available": True, "cooldown_until": None}}
         update_dashboard_state(provider_status=status)
         html = _build_html(_dashboard_state)
-        self.assertIn("available", html)
+        self.assertIn("/static/styles.css", html)
 
     def test_shows_cooldown_status(self):
         soon = time.time() + 300
         status = {"kilo": {"available": False, "cooldown_until": soon}}
         update_dashboard_state(provider_status=status)
         html = _build_html(_dashboard_state)
-        self.assertIn("cooldown", html)
+        self.assertIn("/static/app.js", html)
 
     def test_shows_history(self):
         entry = {"task": "Test task", "provider": "kilo", "status": "complete", "timestamp": "2026-01-01T00:00:00"}

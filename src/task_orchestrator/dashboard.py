@@ -26,6 +26,7 @@ _dashboard_state = {
 _DASHBOARD_HISTORY_MAX = 50
 _CHECKBOX_TASK_RE = re.compile(r"^\s*[-*]\s\[([ xX])\]\s+(.+)$")
 TEMPLATE_PATH = Path(__file__).resolve().parent.parent.parent / "dashboard" / "templates" / "index.html"
+STATIC_PATH = Path(__file__).resolve().parent.parent.parent / "dashboard" / "static"
 _dashboard_server_ref = None
 
 
@@ -206,7 +207,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
     """Serves JSON and HTML for the local dashboard."""
 
     def do_GET(self):
-        if self.path == "/api/state":
+        if self.path.startswith("/static/"):
+            self._serve_static()
+        elif self.path == "/api/state":
             self._serve_json()
         elif self.path == "/api/version":
             self._serve_version()
@@ -214,6 +217,32 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._serve_health()
         else:
             self._serve_html()
+
+    def _serve_static(self):
+        rel = self.path[len("/static/"):]
+        # Prevent directory traversal
+        if ".." in rel or rel.startswith("/"):
+            self.send_error(403)
+            return
+        file_path = STATIC_PATH / rel
+        try:
+            body = file_path.read_bytes()
+        except FileNotFoundError:
+            self.send_error(404)
+            return
+        if file_path.suffix == ".css":
+            content_type = "text/css"
+        elif file_path.suffix == ".js":
+            content_type = "application/javascript"
+        elif file_path.suffix in (".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico"):
+            content_type = f"image/{file_path.suffix.lstrip('.')}"
+        else:
+            content_type = "application/octet-stream"
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def _serve_health(self):
         body = b'{"status":"ok"}'
