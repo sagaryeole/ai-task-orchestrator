@@ -13,7 +13,7 @@ Tasks to make the project easier to contribute to, easier to maintain, and frien
 - [ ] Replace the current `nargs="?"` positional-command trick (`init` / `validate` as optional positional args) with real `argparse` subparsers. This gives clean `--help` output per subcommand (`task-orchestrator init --help`, `task-orchestrator run --help`) instead of a single flat help screen.
 - [x] Add a `run` subcommand that owns all runtime flags (`--once`, `--dry-run`, `--concurrency`, `--provider`, `--task`, `--resume-from`, `--skip-section`, `--list-tasks`, `--summary`, `--json-logs`). This makes the CLI scannable: `task-orchestrator run --help` lists only run-time flags, not `init`/`validate` noise.
 - [ ] Remove the manual `if "--version" in argv` check and use `parser.add_argument("--version", action="version", ...)` instead.
-- [ ] Add `src/task_orchestrator/__main__.py` that calls `cli.main()`, so `python -m task_orchestrator` works (standard Python convention).
+- [x] Add `src/task_orchestrator/__main__.py` that calls `cli.main()`, so `python -m task_orchestrator` works (standard Python convention).
 - [x] Keep `orchestrator.py` (repo root) as the backward-compatible shim for `python orchestrator.py`, but update `CONTRIBUTING.md` to point contributors to the package path.
 
 ### Test imports — migrate off the root shim
