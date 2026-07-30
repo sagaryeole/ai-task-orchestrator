@@ -54,7 +54,7 @@ Tasks to make the project easier to contribute to, easier to maintain, and frien
 - [x] Add `docs/architecture.md` with a one-paragraph purpose per module and a directory-tree map, so contributors landing from the README know where new code belongs without reading 2900-line files.
 - [ ] Add a `## [Unreleased]` section at the top of `CHANGELOG.md` so contributors know where to put entry bullets.
 - [ ] Add `__main__.py` coverage to `tests/` — a smoke test that `python -m task_orchestrator --help` exits 0 and prints the banner/help.
-- [ ] Add `docs/contributing-architecture.md` (or expand `CONTRIBUTING.md`) with a concrete "where does X go?" table mapping feature areas to modules.
+- [x] Add `docs/contributing-architecture.md` (or expand `CONTRIBUTING.md`) with a concrete "where does X go?" table mapping feature areas to modules.
 
 ### Priority order
 

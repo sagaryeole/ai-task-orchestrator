@@ -23,7 +23,9 @@ ruff check src/ orchestrator.py tests/
 > **Where to make changes:** All production code lives in the installable
 > package at `src/task_orchestrator/`. The root-level `orchestrator.py` is a
 > backward-compatible shim only — do **not** add features there. Edit the
-> appropriate module under `src/task_orchestrator/` instead.
+> appropriate module under `src/task_orchestrator/` instead. See
+> [docs/contributing-architecture.md](../docs/contributing-architecture.md) for a
+> full "where does X go?" mapping of feature areas to modules.
 
 ## Architecture
 
