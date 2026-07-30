@@ -1647,7 +1647,7 @@ class TestGitRunRetry(unittest.TestCase):
 
     def test_git_run_success_no_retry(self):
         from unittest.mock import patch
-        with patch('task_orchestrator.runner.subprocess.run') as mock_run:
+        with patch('task_orchestrator.git.subprocess.run') as mock_run:
             mock_run.return_value = self._mock_result(0, stdout="")
             result = git_run(["status", "--porcelain"], cwd="/tmp")
             self.assertEqual(result.returncode, 0)
@@ -1655,7 +1655,7 @@ class TestGitRunRetry(unittest.TestCase):
 
     def test_git_run_retries_on_index_lock(self):
         from unittest.mock import patch
-        with patch('task_orchestrator.runner.subprocess.run') as mock_run:
+        with patch('task_orchestrator.git.subprocess.run') as mock_run:
             mock_run.side_effect = [
                 self._mock_result(128, stderr="fatal: Unable to create '/tmp/.git/index.lock': File exists."),
                 self._mock_result(0, stdout=""),
@@ -1666,7 +1666,7 @@ class TestGitRunRetry(unittest.TestCase):
 
     def test_git_run_retries_on_head_lock(self):
         from unittest.mock import patch
-        with patch('task_orchestrator.runner.subprocess.run') as mock_run:
+        with patch('task_orchestrator.git.subprocess.run') as mock_run:
             mock_run.side_effect = [
                 self._mock_result(128, stderr="fatal: Unable to create '/tmp/.git/HEAD.lock': File exists."),
                 self._mock_result(0, stdout=""),
@@ -1677,7 +1677,7 @@ class TestGitRunRetry(unittest.TestCase):
 
     def test_git_run_retries_once_then_fails(self):
         from unittest.mock import patch
-        with patch('task_orchestrator.runner.subprocess.run') as mock_run:
+        with patch('task_orchestrator.git.subprocess.run') as mock_run:
             mock_run.side_effect = [
                 self._mock_result(128, stderr="fatal: index.lock: File exists."),
                 self._mock_result(128, stderr="fatal: index.lock: File exists."),
@@ -1688,7 +1688,7 @@ class TestGitRunRetry(unittest.TestCase):
 
     def test_git_run_no_retry_on_non_transient_error(self):
         from unittest.mock import patch
-        with patch('task_orchestrator.runner.subprocess.run') as mock_run:
+        with patch('task_orchestrator.git.subprocess.run') as mock_run:
             mock_run.return_value = self._mock_result(128, stderr="fatal: not a git repository (or any of the parent directories): .git")
             result = git_run(["status", "--porcelain"], cwd="/tmp")
             self.assertEqual(result.returncode, 128)
@@ -1696,7 +1696,7 @@ class TestGitRunRetry(unittest.TestCase):
 
     def test_git_run_no_retry_on_other_error(self):
         from unittest.mock import patch
-        with patch('task_orchestrator.runner.subprocess.run') as mock_run:
+        with patch('task_orchestrator.git.subprocess.run') as mock_run:
             mock_run.return_value = self._mock_result(1, stderr="some other git error")
             result = git_run(["status", "--porcelain"], cwd="/tmp")
             self.assertEqual(result.returncode, 1)
@@ -1704,7 +1704,7 @@ class TestGitRunRetry(unittest.TestCase):
 
     def test_git_run_passes_cwd(self):
         from unittest.mock import patch
-        with patch('task_orchestrator.runner.subprocess.run') as mock_run:
+        with patch('task_orchestrator.git.subprocess.run') as mock_run:
             mock_run.return_value = self._mock_result(0, stdout="")
             git_run(["status", "--porcelain"], cwd="/some/path")
             call_kwargs = mock_run.call_args
@@ -1712,7 +1712,7 @@ class TestGitRunRetry(unittest.TestCase):
 
     def test_git_run_passes_timeout(self):
         from unittest.mock import patch
-        with patch('task_orchestrator.runner.subprocess.run') as mock_run:
+        with patch('task_orchestrator.git.subprocess.run') as mock_run:
             mock_run.return_value = self._mock_result(0, stdout="")
             git_run(["status", "--porcelain"], cwd="/tmp", timeout=5)
             call_kwargs = mock_run.call_args

@@ -19,20 +19,19 @@ Usage:
 Edit task-orchestrator.config.json to configure your providers, Todo file, and delay.
 """
 
-import subprocess
-import threading
-import time
-import json
+import os
 import re
 import sys
-import os
+import json
+import time
 import shlex
 import signal
 import atexit
-import datetime
 import shutil
+import subprocess
+import datetime
+import threading
 import webbrowser
-from contextlib import contextmanager
 from pathlib import Path
 
 from .dashboard import (
@@ -51,18 +50,24 @@ from .dashboard import (
     _build_html,  # noqa: F401 — re-exported for tests
     html_escape,  # noqa: F401 — re-exported for tests
 )
+from .git import (
+    DEFAULT_CONFIG_FILENAME,  # noqa: F401 — re-exported for tests and config code
+    TASK_REGEX,  # noqa: F401 — re-exported for tests
+    _GIT_LOCK_PATTERNS,  # noqa: F401 — re-exported for tests
+    _count_matching_lines,  # noqa: F401 — re-exported for tests
+    _get_section_for_line,  # noqa: F401 — re-exported for tests
+    _git_dirty_count,  # noqa: F401 — re-exported for tests
+    _is_transient_git_error,  # noqa: F401 — re-exported for tests
+    _todo_lock,  # noqa: F401 — re-exported for tests
+    count_completed_tasks,  # noqa: F401 — re-exported for tests
+    count_total_tasks,  # noqa: F401 — re-exported for tests
+    defer_task,  # noqa: F401 — re-exported for tests
+    git_run,  # noqa: F401 — re-exported for tests
+    load_tasks,  # noqa: F401 — re-exported for tests
+    mark_complete,  # noqa: F401 — re-exported for tests
+    validate_git_working_tree,  # noqa: F401 — re-exported for tests
+)
 
-try:
-    import fcntl
-except ImportError:  # Windows
-    fcntl = None
-
-try:
-    import msvcrt
-except ImportError:  # non-Windows
-    msvcrt = None
-
-DEFAULT_CONFIG_FILENAME = "task-orchestrator.config.json"
 CONFIG_PATH = Path(DEFAULT_CONFIG_FILENAME)
 STATE_PATH = Path("state.json")
 PID_PATH = Path("orchestrator.pid")
@@ -70,7 +75,6 @@ DASHBOARD_OPENED_SENTINEL = Path(".dashboard_opened")
 LOG_DIR = Path("logs")
 LOG_MAX_BYTES = 10 * 1024 * 1024  # 10 MB per file
 LOG_BACKUP_COUNT = 5
-TASK_REGEX = r"- \[ \] (.+)"
 TAG_REGEX = r"(\[\w+\])"
 MAX_TASKS_PER_BATCH = 5  # hard cap -- one agent invocation covering too many
 # tasks at once makes the all-or-nothing verify/commit gate too coarse (a
@@ -692,122 +696,8 @@ def _resolve_shell_python(cmd: str) -> str:
 
 
 # --------------------------------------------------------------------------
-# Todo handling
+# Todo handling (moved to task_orchestrator.git)
 # --------------------------------------------------------------------------
-
-@contextmanager
-def _todo_lock(todo_path: Path):
-    """Advisory cross-process lock around Todo.md writes so two orchestrator
-    instances pointed at the same file cannot interleave read-modify-write
-    sequences and corrupt it."""
-    lock_path = Path(str(todo_path) + ".lock")
-    fd = os.open(str(lock_path), os.O_CREAT | os.O_WRONLY)
-    try:
-        if fcntl is not None:
-            fcntl.flock(fd, fcntl.LOCK_EX)
-        elif msvcrt is not None:
-            # msvcrt.locking() locks from the current file offset for n bytes.
-            os.lseek(fd, 0, os.SEEK_SET)
-            try:
-                os.write(fd, b"0")
-            except OSError:
-                pass
-            os.lseek(fd, 0, os.SEEK_SET)
-            msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
-        yield
-    finally:
-        if fcntl is not None:
-            fcntl.flock(fd, fcntl.LOCK_UN)
-        elif msvcrt is not None:
-            try:
-                os.lseek(fd, 0, os.SEEK_SET)
-                msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
-            except OSError:
-                pass
-        os.close(fd)
-
-
-def _get_section_for_line(text: str, target_line: str) -> str:
-    """Return the header text for the section containing the given task line,
-    or '' if it is not under any header. Headers are lines matching ^#{1,6} .
-    """
-    current_header = ""
-    for line in text.splitlines():
-        stripped = line.strip()
-        if re.match(r"^#{1,6}\s+.+", stripped):
-            current_header = stripped.lstrip("#").strip()
-        elif stripped == target_line.strip():
-            return current_header
-    return ""
-
-
-def load_tasks(todo_path: Path, skip_sections=None):
-    skip_sections = [s.lower() for s in (skip_sections or [])]
-    if not skip_sections:
-        return re.findall(TASK_REGEX, todo_path.read_text())
-    text = todo_path.read_text()
-    all_tasks = re.findall(TASK_REGEX, text)
-    return [
-        t for t in all_tasks
-        if _get_section_for_line(text, f"- [ ] {t}").lower() not in skip_sections
-    ]
-
-
-def mark_complete(todo_path: Path, task: str):
-    with _todo_lock(todo_path):
-        text = todo_path.read_text()
-        text = text.replace(f"- [ ] {task}", f"- [x] {task}", 1)
-        todo_path.write_text(text)
-
-
-def defer_task(todo_path: Path, task: str):
-    """Move a task to the end of the file, still unchecked. Without this, a
-    task that never succeeds (and is never explicitly marked complete) stays
-    at index 0 forever -- load_tasks() always re-reads from the top, so it
-    would be retried on every single loop iteration, permanently blocking
-    every other task behind it."""
-    with _todo_lock(todo_path):
-        text = todo_path.read_text()
-        text = text.replace(f"- [ ] {task}", "", 1)
-        if text.endswith("\n"):
-            text = text.rstrip("\n") + f"\n- [ ] {task}\n"
-        else:
-            text = text + f"\n- [ ] {task}\n"
-        todo_path.write_text(text)
-
-
-def _count_matching_lines(text, line_pattern, skip_sections):
-    """Count lines matching line_pattern, excluding any under a section whose
-    header is in skip_sections. Counts occurrences directly rather than
-    de-duplicating by line text -- a set-based diff here would undercount
-    whenever two different sections happen to contain byte-identical task
-    text (a real thing we found in an actual Todo.md), since a set can't
-    tell two identical lines in different sections apart."""
-    if not skip_sections:
-        return len(re.findall(line_pattern, text, re.MULTILINE))
-    count = 0
-    current_header = ""
-    for line in text.splitlines():
-        stripped = line.strip()
-        if re.match(r"^#{1,6}\s+.+", stripped):
-            current_header = stripped.lstrip("#").strip()
-        elif re.match(line_pattern, stripped):
-            if current_header.lower() not in skip_sections:
-                count += 1
-    return count
-
-
-def count_total_tasks(todo_path: Path, skip_sections=None):
-    text = todo_path.read_text()
-    skip_sections = [s.lower() for s in (skip_sections or [])]
-    return _count_matching_lines(text, r"^- \[.\] .+$", skip_sections)
-
-
-def count_completed_tasks(todo_path: Path, skip_sections=None):
-    text = todo_path.read_text()
-    skip_sections = [s.lower() for s in (skip_sections or [])]
-    return _count_matching_lines(text, r"^- \[x\] .+$", skip_sections)
-
 
 def format_duration(seconds):
     if seconds is None:
@@ -1028,59 +918,9 @@ def _process_group_cpu_percent(pgid):
     return total if found else None
 
 
-_GIT_LOCK_PATTERNS = [
-    "index.lock",
-    "head.lock",
-    "unable to create",
-    "locked",
-]
-
-
-def _is_transient_git_error(result):
-    """Return True if the git failure looks transient (e.g. lock contention)
-    rather than a permanent user/configuration error."""
-    if result.returncode == 0:
-        return False
-    combined = (result.stderr or "").lower() + (result.stdout or "").lower()
-    return any(p in combined for p in _GIT_LOCK_PATTERNS)
-
-
-def git_run(args, cwd=None, timeout=10):
-    """Run a git command, retrying once on transient failures (e.g. index.lock
-    contention). Returns the subprocess.CompletedProcess result."""
-    result = subprocess.run(
-        ["git"] + list(args),
-        cwd=cwd, capture_output=True, text=True, errors="replace", timeout=timeout,
-    )
-    if _is_transient_git_error(result):
-        time.sleep(0.5)
-        result = subprocess.run(
-            ["git"] + list(args),
-            cwd=cwd, capture_output=True, text=True, errors="replace", timeout=timeout,
-        )
-    return result
-
-
-def validate_git_working_tree(working_directory):
-    """Fail fast if working_directory is not inside a git working tree."""
-    result = git_run(["rev-parse", "--is-inside-work-tree"], cwd=working_directory)
-    if result.returncode != 0 or result.stdout.strip().lower() != "true":
-        sys.exit(
-            f"Fatal: '{working_directory}' is not inside a git working tree. "
-            f"Set a valid 'working_directory' in {DEFAULT_CONFIG_FILENAME} or run from inside a git repo."
-        )
-
-
-def _git_dirty_count(working_directory):
-    """Count files with uncommitted changes. None if not a git repo / on failure."""
-    try:
-        result = git_run(["status", "--porcelain"], cwd=working_directory)
-    except Exception:
-        return None
-    if result.returncode != 0:
-        return None
-    return len([line for line in result.stdout.splitlines() if line.strip()])
-
+# --------------------------------------------------------------------------
+# Git operations (moved to task_orchestrator.git)
+# --------------------------------------------------------------------------
 
 # --------------------------------------------------------------------------
 # Provider pool
