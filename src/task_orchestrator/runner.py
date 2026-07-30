@@ -66,6 +66,7 @@ DEFAULT_CONFIG_FILENAME = "task-orchestrator.config.json"
 CONFIG_PATH = Path(DEFAULT_CONFIG_FILENAME)
 STATE_PATH = Path("state.json")
 PID_PATH = Path("orchestrator.pid")
+DASHBOARD_OPENED_SENTINEL = Path(".dashboard_opened")
 LOG_DIR = Path("logs")
 LOG_MAX_BYTES = 10 * 1024 * 1024  # 10 MB per file
 LOG_BACKUP_COUNT = 5
@@ -1833,10 +1834,13 @@ def main(args=None):
         print(f"Dashboard URL: {dashboard_url}", flush=True)
     _write_pid_file(dashboard_url)
     if dashboard_url and config.get("open_dashboard_in_browser", False):
-        try:
-            webbrowser.open(dashboard_url)
-        except Exception:
-            pass
+        if not DASHBOARD_OPENED_SENTINEL.exists():
+            try:
+                webbrowser.open(dashboard_url)
+            except Exception:
+                pass
+            else:
+                DASHBOARD_OPENED_SENTINEL.write_text("")
     _dashboard_state["start_time"] = time.time()
 
     todo_path = Path(config["todo_file"])
