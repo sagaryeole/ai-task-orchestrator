@@ -50,7 +50,7 @@ Tasks to make the project easier to contribute to, easier to maintain, and frien
 
 ### Open-repo and contributor experience
 
-- [ ] Update `README.md` line 90 ("single-file Python you can read end-to-end") to reflect the new module structure while preserving the stdlib-only promise. Suggested replacement: "Pure Python 3 standard library, split into focused modules you can read in under 5 minutes each."
+- [x] Update `README.md` line 90 ("single-file Python you can read end-to-end") to reflect the new module structure while preserving the stdlib-only promise. Suggested replacement: "Pure Python 3 standard library, split into focused modules you can read in under 5 minutes each."
 - [ ] Add `docs/architecture.md` with a one-paragraph purpose per module and a directory-tree map, so contributors landing from the README know where new code belongs without reading 2900-line files.
 - [ ] Add a `## [Unreleased]` section at the top of `CHANGELOG.md` so contributors know where to put entry bullets.
 - [ ] Add `__main__.py` coverage to `tests/` — a smoke test that `python -m task_orchestrator --help` exits 0 and prints the banner/help.

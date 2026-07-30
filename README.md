@@ -87,7 +87,7 @@ Prompting the agent itself to "wait 60 seconds and then continue" doesn't work â
 - API keys stay in your local environment variables; they're never logged, uploaded, or stored in plain text
 - Secrets in log output are automatically redacted
 - No analytics, no tracking, no cloud dependency
-- Fully auditable: single-file Python you can read end-to-end
+- Fully auditable: Pure Python 3 standard library, split into focused modules you can read in under 5 minutes each.
 
 Your code, your keys, your machine. Nothing leaves without you explicitly configuring a provider CLI to do so.
 
