@@ -1,0 +1,46 @@
+{
+  "_comment": "Codex CLI provider — requires the codex CLI (https://github.com/openai/codex). Uses 'codex exec' which reads the prompt from stdin. Cloud mode requires OPENAI_API_KEY; local mode uses --oss --local-provider to talk to LM Studio or Ollama.",
+  "todo_file": "Todo.md",
+  "working_directory": ".",
+  "prompt_template": "prompts/task_prompt.txt",
+  "delay_seconds": 45,
+  "subprocess_timeout": null,
+  "stall_timeout_seconds": 600,
+  "max_retries_per_provider": 1,
+  "require_manual_confirmation": false,
+  "continue_on_failure": true,
+  "auto_commit": true,
+  "verify_commands": [],
+  "providers": [
+    {
+      "_comment": "Cloud mode — uses your OpenAI account. Set OPENAI_API_KEY in your environment.",
+      "name": "codex",
+      "enabled": true,
+      "command": "codex exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox",
+      "env": {"OPENAI_API_KEY": "$OPENAI_API_KEY"},
+      "rate_limit_patterns": ["rate limit", "429", "quota exceeded", "too many requests"],
+      "cooldown_seconds": 300,
+      "priority": 5
+    },
+    {
+      "_comment": "Local mode — uses LM Studio as the backend. No API key needed.",
+      "name": "codex-lmstudio",
+      "enabled": false,
+      "command": "codex exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox --oss --local-provider lmstudio -m qwen/qwen3.5-9b",
+      "env": {},
+      "rate_limit_patterns": [],
+      "cooldown_seconds": 60,
+      "priority": 1
+    },
+    {
+      "_comment": "Local mode — uses Ollama as the backend. No API key needed.",
+      "name": "codex-ollama",
+      "enabled": false,
+      "command": "codex exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox --oss --local-provider ollama -m qwen2.5:0.5b",
+      "env": {},
+      "rate_limit_patterns": [],
+      "cooldown_seconds": 60,
+      "priority": 1
+    }
+  ]
+}

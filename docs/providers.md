@@ -69,19 +69,49 @@ The orchestrator launches your provider's `command` as a subprocess, passes the 
 
 **Prompt mode:** Stdin
 
+## Codex CLI
+
+```json
+{
+  "name": "codex",
+  "command": "codex exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox",
+  "env": {"OPENAI_API_KEY": "$OPENAI_API_KEY"},
+  "rate_limit_patterns": ["rate limit", "429", "quota exceeded", "too many requests"],
+  "cooldown_seconds": 300
+}
+```
+
+**Prerequisites:**
+
+- Install the [codex CLI](https://github.com/openai/codex)
+- Set `OPENAI_API_KEY` in `env` (or your shell environment)
+- `exec` subcommand for non-interactive runs (reads prompt from stdin)
+- `--skip-git-repo-check` allows running outside a git repo
+- `--dangerously-bypass-approvals-and-sandbox` for fully unattended operation
+- For local models: add `--oss --local-provider lmstudio -m <model>` (or `ollama`) and drop the API key
+
+**Prompt mode:** Stdin
+
 ## Aider
 
 ```json
 {
   "name": "aider",
-  "command": "aider --yes --no-git --message {{TASK}}",
+  "command": "aider --yes-always --no-pretty --no-stream --no-auto-commits --message-file -",
   "env": {"OPENAI_API_KEY": "$OPENAI_API_KEY"},
   "rate_limit_patterns": ["rate limit", "429", "quota"],
   "cooldown_seconds": 600
 }
 ```
 
-**Prompt mode:** Arg-based (`{{TASK}}`)
+**Prerequisites:**
+
+- Install [aider](https://aider.chat)
+- `--yes-always` for non-interactive auto-confirmation
+- `--message-file -` reads the prompt from stdin
+- For local models: add `--model openai/<model> --openai-api-base <url> --api-key openai=<dummy>`
+
+**Prompt mode:** Stdin
 
 ## Ollama (Local)
 
@@ -134,7 +164,7 @@ Combine providers with priority for automatic failover:
 }
 ```
 
-The orchestrator uses the highest-priority available provider. When Claude is rate-limited, it falls to Copilot. When both are exhausted, it uses the local Ollama or Lm Studio model.
+The orchestrator uses the highest-priority available provider. When Claude is rate-limited, it falls to Codex or Copilot. When those are exhausted too, it uses Aider, then the local Ollama or Lm Studio models.
 
 ## Adding Your Own Provider
 

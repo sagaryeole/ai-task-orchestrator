@@ -21,8 +21,8 @@ _INTERACTIVE_LAUNCHERS = {
         "(and --permission-mode bypassPermissions so it doesn't hang waiting for tool-use approval).",
     },
     "codex": {
-        "headless_flags": ["--quiet", "--no-interactive"],
-        "message": "Codex CLI may be interactive; use --quiet for unattended runs.",
+        "headless_flags": ["exec"],
+        "message": "Codex CLI is interactive by default; use 'codex exec' for unattended runs.",
     },
     "kilo": {
         "headless_flags": ["--auto"],
@@ -38,6 +38,10 @@ _INTERACTIVE_LAUNCHERS = {
             "GitHub Copilot CLI prompts for tool approval by default; "
             "use --allow-all-tools (or --yolo) for unattended runs."
         ),
+    },
+    "aider": {
+        "headless_flags": ["--yes-always"],
+        "message": "Aider prompts for confirmation by default; use --yes-always for unattended runs.",
     },
 }
 

@@ -1,243 +1,66 @@
-```json
-[test.py]
-[type]
-
-[requirements.txt]
-[List of requirements]
-==
-
-[surplus_test.py]
-[type]
-
-
-[tests]
-* [surrogate_check]
-  * [file: files/tests/surrogate_check/func.py]
-***
-```json
-```json
-```python
-from datetime import datetime, timezone
-
-def find_all_fruits(fruit):
-
-    # Implementation of the function to find all fruits in a given fruit.
-
-```
-
-To run Type Check check run:
-type-check -f test.py
-```
-
-Fix errors and make tests pass for type-check. If necessary then fix it after that:
-
-  `test.py` and open .gitignore file or reset project.
-===
-```json
-
-===FILE: 3. Python Programs/Testing/check_test_with_surrogates_220816 - 3.3 python practice.py===
-```python
-from datetime import datetime, timezone
-
-def find_all_fruits(fruit): # Corrected line
-
-    for sub in fruits:
-        if fruit == sub[fruit]: 
-
-The function now works as intended but needs more testing to ensure correct implementation.
-
-To run Python test using `pytest` add the following in your project directory:
-
-```
-pytest tests/surrogate_check/test.py
-```json
-```json
-```python
-
-
-def find_all_fruits(fruit): # Corrected line
-
-    for sub in fruits:
-        if fruit == sub[fruit]: 
-```
-
-Fix this code and make test works with data.
-===
-===FILE: 3. Python Programs/Testing/check_test_with_surrogates_220816 - 4.python practice.py===
-```python
-def find_all_fruits(fruit): # Corrected line
-
-    for fruits in json_items:
-```
-
-To run `pytest` add the following to your script:
-
-```
-pytest tests/surrogate_check/check_test_3test.py
-```json
-```python
-from datetime import datetime, timezone
-
-def check_data(data):
-
-    # Implementation of data validation and error checking
-```
-
-Make sure all fields except for json are not present.
-===
-===FILE: 3. Python Programs/Testing/check_test_with_surrogates_220816 - 5 python practice.py===
-```python
-from datetime import datetime, timezone
-
-def check_data(data): # Ensure none of the custom fields are in test data
-
-    for fruit in fruits: 
-```
-
-To run pytest with test data added should pass.
-
-Make sure all fruits (which include correct field names) are there.
-
-Check `data/test.json` has no wrong data. Also ensure correct implementation
-===
-```json
-```json
-```python
-from datetime import datetime, timezone
-
-def find_all_fruits(fruit):
-
-```
-
-Type Check to verify implementation worked:
-
-  `.gitignore` - remove test.py, .pytest_requirements and tests/
-  `test.py`
-    * [surrogate_check]
-      * [file: files/tests/surrogate_check/func.py]
-
-```json
-```python
-def find_all_fruits(fruit): 
-```
-
-Fix type check to ensure correct implementation:
-
-  `.gitignore` - remove data, test.json and .pytest_requirements
-  `test.py`
-    * [surrogate_check]
-      * [file: files/tests/surrogate_check/func.py]
-
-```json
-```json
-```python
-from datetime import datetime, timezone
-
-def find_all_fruits(fruit):
-```
-
-Make sure fruits is correct dictionary:
-
-  `.gitignore` - remove data tests or fixtures.json and test.py
-  `test.py`
-    * [surrogate_check]
-      * [file: files/tests/surrogate_check/func.py]
-
-```json
-```python
-
-def check_data(data):
-
-    # Ensure all fields except fruits.json are correct.
-
-```
-
-To run pytest add the following to your script:
-
-```json
-```json
-```python
-from datetime import datetime, timezone 
-
-def check_sanity_check(data): # Ensure fruits are correct (data should include json file)
-```json
-```python
-# Use typesetcheck if it is not present
-
-import typesetcheck
-%pydocx 
-typesetcheck -c test.py tests/surrogate_check/func.py
-typesetcheck test_python_checkers.py \
-tests/surrogate_check/func.py \
-"data/surrogate_check/data.json" 
-```json
-```python
-from datetime import datetime, timezone
-
-def find_all_fruits(fruit):
-
-    for fruits in json_items:
-```
-
-To run tests with correct data:
-
-  `.gitignore` - remove test.py and other fixtures
-  `test.py`
-    * [surrogate_check]
-      * [file: files/tests/surrogate_check/func.py]
-
-```json
-```python
-from datetime import datetime, timezone
-
-def find_all_fruits(fruit): # Ensure all fruits are stored correctly
-```
-
-Make sure fruit is defined somewhere other than `find_data`:
-===
-===FILE: 1. Python Practice - A-Z Files/Python practice code for advanced Python 3 Scripts - Day 4.py===
-```python
-from datetime import datetime, timezone
-
-def check_fruits(fruits):
-    fruits = ["apple", "banana", "pear", "orange"]   # List of fruits you have access to
-
-```
-
-Type Check with correct implementation:
-type-check check run:
-
-```json
-```json
-```python
-def find_all_fruits(fruit):
-
-    for items in data:        
-        if fruit == items[fruit]:
-            return True
-```
-
-Make sure all fields except `data.json` are populated.
-
-To add json file:
-===
-===FILE: test.py===
-```python
- from datetime import datetime, timezone
-
- def check_data(data):
-     # Implement your custom validation function here.
-    data = [
-        [ "apple", "banana", "pear", 1],
-       [ "orange" , ],
-    ]
-
-```
-
-Check data.json contains the correct fruits:
-===
-===FILE: .pytest_requirements===
-```json
-    * ['tests/surrogate_check/func.py']
-    * ['examples/surrogate_check_test.json'] 
-    
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Testing / linting caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+*.py,cover
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Project runtime artifacts
+logs/
+*.log
+state.json
+Todo.md.lock
+config.json.bak
+
+# Local agent working dirs (not part of the repo)
+.kilo/
+.claude/
+.aider*
+
+# Junk files created by agent test runs
+main.py
+test.py

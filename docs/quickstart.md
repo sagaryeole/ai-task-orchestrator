@@ -64,6 +64,59 @@ Edit `task-orchestrator.config.json` and set your agent CLI command:
     }
     ```
 
+=== "Claude Code"
+
+    ```json
+    {
+      "providers": [{
+        "name": "claude",
+        "command": "claude -p --permission-mode bypassPermissions",
+        "env": {},
+        "rate_limit_patterns": ["rate limit", "429", "overloaded", "capacity"],
+        "cooldown_seconds": 600
+      }]
+    }
+    ```
+
+=== "Codex CLI"
+
+    ```json
+    {
+      "providers": [{
+        "name": "codex",
+        "command": "codex exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox",
+        "env": {"OPENAI_API_KEY": "$OPENAI_API_KEY"},
+        "rate_limit_patterns": ["rate limit", "429", "quota exceeded"],
+        "cooldown_seconds": 300
+      }]
+    }
+    ```
+
+    Uses `codex exec` which reads the prompt from stdin. Requires the
+    [codex CLI](https://github.com/openai/codex) and an `OPENAI_API_KEY`.
+    For local models, add `--oss --local-provider lmstudio -m <model>`
+    (or `ollama`) and drop the API key.
+
+=== "Aider"
+
+    ```json
+    {
+      "providers": [{
+        "name": "aider",
+        "command": "aider --yes-always --no-pretty --no-stream --no-auto-commits --message-file -",
+        "env": {"OPENAI_API_KEY": "$OPENAI_API_KEY"},
+        "rate_limit_patterns": ["rate limit", "429", "quota"],
+        "cooldown_seconds": 300
+      }]
+    }
+    ```
+
+    Uses `--message-file -` to read the prompt from stdin. Requires
+    [aider](https://aider.chat) and an LLM API key. For a local
+    OpenAI-compatible server (LM Studio, Ollama), add
+    `--model openai/<model> --openai-api-base <url> --api-key openai=<dummy>`
+    and drop the real API key.
+
 === "Kilo Code"
 
     ```json
@@ -88,7 +141,7 @@ Edit `task-orchestrator.config.json` and set your agent CLI command:
         "env": {},
         "rate_limit_patterns": [],
         "cooldown_seconds": 10,
-        "priority": 1
+        "priority": 2
       }]
     }
     ```

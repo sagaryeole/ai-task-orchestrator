@@ -1,5 +1,5 @@
 {
-  "_comment": "Multi-provider setup: Claude primary, Copilot fallback, local Ollama and Lm Studio last resort",
+  "_comment": "Multi-provider setup: Claude primary, Codex fallback, Copilot third, Aider fourth, local Ollama and Lm Studio last resort",
   "todo_file": "Todo.md",
   "working_directory": ".",
   "prompt_template": "prompts/task_prompt.txt",
@@ -15,11 +15,20 @@
     {
       "name": "claude",
       "enabled": true,
-      "command": "claude --no-interactive --print",
-      "env": {"ANTHROPIC_API_KEY": "$ANTHROPIC_API_KEY"},
-      "rate_limit_patterns": ["rate limit", "429", "overloaded"],
+      "command": "claude -p --permission-mode bypassPermissions",
+      "env": {},
+      "rate_limit_patterns": ["rate limit", "429", "overloaded", "capacity", "usage limit"],
       "cooldown_seconds": 600,
       "priority": 10
+    },
+    {
+      "name": "codex",
+      "enabled": true,
+      "command": "codex exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox",
+      "env": {"OPENAI_API_KEY": "$OPENAI_API_KEY"},
+      "rate_limit_patterns": ["rate limit", "429", "quota exceeded", "too many requests"],
+      "cooldown_seconds": 300,
+      "priority": 5
     },
     {
       "name": "copilot",
@@ -28,7 +37,16 @@
       "env": {},
       "rate_limit_patterns": ["rate limit", "429", "too many requests"],
       "cooldown_seconds": 300,
-      "priority": 5
+      "priority": 3
+    },
+    {
+      "name": "aider",
+      "enabled": true,
+      "command": "aider --yes-always --no-pretty --no-stream --no-auto-commits --message-file -",
+      "env": {"OPENAI_API_KEY": "$OPENAI_API_KEY"},
+      "rate_limit_patterns": ["rate limit", "429", "quota"],
+      "cooldown_seconds": 300,
+      "priority": 2
     },
     {
       "name": "ollama-local",
@@ -37,7 +55,7 @@
       "env": {},
       "rate_limit_patterns": [],
       "cooldown_seconds": 60,
-      "priority": 2
+      "priority": 1
     },
     {
       "name": "lmstudio-local",
@@ -49,7 +67,7 @@
       },
       "rate_limit_patterns": [],
       "cooldown_seconds": 60,
-      "priority": 1
+      "priority": 0
     }
   ]
 }

@@ -65,7 +65,7 @@ task-orchestrator --once
 | GitHub Copilot CLI | `copilot --allow-all-tools --no-ask-user -s -p {{TASK}}` | Arg (`{{TASK}}`) | Yes | `copilot login` required first |
 | Claude Code | `claude -p --permission-mode bypassPermissions` | stdin | Yes | Set `ANTHROPIC_API_KEY` in `env` for API billing, or leave `env` empty to use an already-logged-in subscription session |
 | Kilo Code | `kilo run --auto` | stdin | Yes | Use `--auto` for unattended runs |
-| Codex CLI | `codex --quiet` | stdin | Partial | May require additional no-interactive flags |
+| Codex CLI | `codex exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox` | stdin | Yes | Use `exec` subcommand for non-interactive runs; add `--oss --local-provider lmstudio -m <model>` for local models |
 | Ollama (local) | `ollama run codellama` | stdin | Yes | Good local fallback, no remote rate limits |
 | Lm Studio (local) | `python src/task_orchestrator/lmstudio_provider.py` | stdin | Yes | OpenAI-compatible local server; set `LM_STUDIO_URL` and `LM_STUDIO_MODEL` in `env` |
 
@@ -267,7 +267,7 @@ Newly delivered capabilities:
 
 Startup intro preview:
 
-![Task Orchestrator startup banner](docs/assets/startup-banner-preview.svg)
+![Task Orchestrator startup banner](docs/assets/orchestrator-startup.svg)
 
 - Header summary shows total/completed/failed/running/pending, progress fill, elapsed runtime, and ETA.
 - Provider chips show live `available` / `cooldown` state with countdowns.
@@ -382,8 +382,8 @@ Prerequisites:
 | GitHub Copilot CLI | `copilot --allow-all-tools --no-ask-user -s -p {{TASK}}` | Arg | ✅ | Requires `copilot login` first |
 | Claude Code | `claude -p --permission-mode bypassPermissions` | Stdin | ✅ | Set `ANTHROPIC_API_KEY` in `env` for API billing, or leave `env` empty for an already-logged-in subscription session |
 | Kilo Code | `kilo run --auto` | Stdin | ✅ | Interactive by default; `--auto` required |
-| Codex CLI | `codex --quiet` | Stdin | Untested | May need `--no-interactive` |
-| Aider | `aider --yes --message {{TASK}}` | Arg | Untested | Auto-confirms with `--yes` |
+| Codex CLI | `codex exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox` | Stdin | Yes | Use `exec` subcommand for non-interactive runs; add `--oss --local-provider lmstudio -m <model>` for local models |
+| Aider | `aider --yes-always --no-pretty --no-stream --no-auto-commits --message-file -` | Stdin | Yes | Auto-confirms with `--yes-always`; `--message-file -` reads prompt from stdin. Add `--model openai/<model> --openai-api-base <url> --api-key openai=<dummy>` for local models |
 | Ollama (local) | `ollama run codellama` | Stdin | Yes | No rate limits (local) |
 | Lm Studio (local) | `python src/task_orchestrator/lmstudio_provider.py` | Stdin | Yes | OpenAI-compatible local server; set `LM_STUDIO_URL` and `LM_STUDIO_MODEL` in `env` |
 

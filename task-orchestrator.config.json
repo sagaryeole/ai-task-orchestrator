@@ -47,6 +47,70 @@
       "cooldown_seconds": 300
     },
     {
+      "name": "claude",
+      "enabled": true,
+      "command": "claude -p --permission-mode bypassPermissions",
+      "env": {},
+      "rate_limit_patterns": [
+        "rate limit",
+        "429",
+        "overloaded",
+        "capacity",
+        "usage limit"
+      ],
+      "cooldown_seconds": 600,
+      "priority": 10
+    },
+    {
+      "name": "codex",
+      "enabled": true,
+      "command": "codex exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox",
+      "env": {
+        "OPENAI_API_KEY": "$OPENAI_API_KEY"
+      },
+      "rate_limit_patterns": [
+        "rate limit",
+        "429",
+        "quota exceeded",
+        "too many requests"
+      ],
+      "cooldown_seconds": 300,
+      "priority": 5
+    },
+    {
+      "name": "codex-lmstudio",
+      "enabled": false,
+      "command": "codex exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox --oss --local-provider lmstudio -m qwen/qwen3.5-9b",
+      "env": {},
+      "rate_limit_patterns": [],
+      "cooldown_seconds": 60,
+      "priority": 1
+    },
+    {
+      "name": "aider",
+      "enabled": true,
+      "command": "aider --yes-always --no-pretty --no-stream --no-auto-commits --message-file -",
+      "env": {
+        "OPENAI_API_KEY": "$OPENAI_API_KEY"
+      },
+      "rate_limit_patterns": [
+        "rate limit",
+        "429",
+        "quota"
+      ],
+      "cooldown_seconds": 300,
+      "priority": 3
+    },
+    {
+      "name": "aider-lmstudio",
+      "enabled": false,
+      "command": "aider --yes-always --no-pretty --no-stream --no-auto-commits --message-file - --model openai/qwen/qwen3.5-9b --openai-api-base http://127.0.0.1:1234/v1 --api-key openai=lm-studio",
+      "env": {},
+      "rate_limit_patterns": [],
+      "cooldown_seconds": 60,
+      "priority": 1
+    },
+    {
       "name": "lmstudio",
       "enabled": true,
       "command": "python src/task_orchestrator/lmstudio_provider.py",
