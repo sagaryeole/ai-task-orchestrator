@@ -21,7 +21,7 @@
   "providers": [
     {
       "name": "kilo",
-      "enabled": true,
+      "enabled": false,
       "command": "kilo run --auto",
       "env": {},
       "rate_limit_patterns": [
@@ -48,7 +48,7 @@
     },
     {
       "name": "lmstudio",
-      "enabled": true,
+      "enabled": false,
       "command": "python src/task_orchestrator/lmstudio_provider.py",
       "env": {
         "LM_STUDIO_URL": "http://127.0.0.1:1234/v1",
@@ -60,7 +60,7 @@
     },
     {
       "name": "kilo-lmstudio",
-      "enabled": false,
+      "enabled": true,
       "command": "kilo run --auto",
       "env": {
         "LM_STUDIO_MODEL": "qwen/qwen3.5-9b",
@@ -76,7 +76,7 @@
     },
     {
       "name": "ollama",
-      "enabled": true,
+      "enabled": false,
       "command": "python src/task_orchestrator/lmstudio_provider.py",
       "env": {
         "PROVIDER_URL": "http://127.0.0.1:11434/v1",

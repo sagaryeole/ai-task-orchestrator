@@ -285,3 +285,6 @@ Tasks to make the project easier to contribute to, easier to maintain, and frien
 2. **Move argparse into `cli.py` with real subparsers** — low risk, high clarity win for anyone reading the entry point.
 3. **Migrate tests to package imports** — low risk, removes the `sys.modules` shim dependency in tests.
 4. **Split `runner.py` into focused modules** — biggest long-term win but most churn; do it after the first three so conflicts are minimal.
+
+
+- [x] Test task: create a file /tmp/ollama_test_output.txt with content "created by ollama orchestrator"
