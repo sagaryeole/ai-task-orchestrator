@@ -9,21 +9,27 @@
   "require_manual_confirmation": false,
   "continue_on_failure": true,
   "auto_commit": true,
-  "verify_commands": ["python -m unittest discover -s tests"],
+  "verify_commands": [
+    "python -m unittest discover -s tests"
+  ],
   "subprocess_timeout_overrides": {
     "[big]": 900,
     "[slow]": 1800
   },
   "log_max_bytes": 10485760,
   "log_backup_count": 5,
-
   "providers": [
     {
       "name": "kilo",
       "enabled": true,
       "command": "kilo run --auto",
       "env": {},
-      "rate_limit_patterns": ["rate limit", "429", "quota exceeded", "too many requests"],
+      "rate_limit_patterns": [
+        "rate limit",
+        "429",
+        "quota exceeded",
+        "too many requests"
+      ],
       "cooldown_seconds": 300,
       "stats_command": "kilo stats --json"
     },
@@ -32,7 +38,12 @@
       "enabled": false,
       "command": "copilot --allow-all-tools --no-ask-user -s -p {{TASK}}",
       "env": {},
-      "rate_limit_patterns": ["rate limit", "429", "quota exceeded", "too many requests"],
+      "rate_limit_patterns": [
+        "rate limit",
+        "429",
+        "quota exceeded",
+        "too many requests"
+      ],
       "cooldown_seconds": 300
     },
     {
@@ -65,11 +76,11 @@
     },
     {
       "name": "ollama",
-      "enabled": false,
+      "enabled": true,
       "command": "python src/task_orchestrator/lmstudio_provider.py",
       "env": {
         "PROVIDER_URL": "http://127.0.0.1:11434/v1",
-        "PROVIDER_MODEL": "qwen3.5:9b"
+        "PROVIDER_MODEL": "qwen2.5:0.5b"
       },
       "rate_limit_patterns": [],
       "cooldown_seconds": 60,
