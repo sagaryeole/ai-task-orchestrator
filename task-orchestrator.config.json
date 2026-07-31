@@ -8,7 +8,7 @@
   "max_retries_per_provider": 1,
   "require_manual_confirmation": false,
   "continue_on_failure": true,
-  "auto_commit": true,
+  "auto_commit": false,
   "verify_commands": [
     "python -m unittest discover -s tests"
   ],
