@@ -21,7 +21,6 @@ def main() -> None:
         help=f"Path to the config file (default: {runner.DEFAULT_CONFIG_FILENAME})"
     )
     subparsers = parser.add_subparsers(dest="command", title="subcommands")
-    parser.set_defaults(command="run")
 
     subparsers.add_parser("init", help="Scaffold a new project in the current directory")
 
@@ -85,7 +84,12 @@ def main() -> None:
         help="Skip pending tasks in Todo.md until reaching the first one containing this text, "
              "then proceed normally from there for the rest of this run. Todo.md itself is not modified."
     )
-    args = parser.parse_args()
+    args, remaining = parser.parse_known_args()
+    if args.command is None:
+        run_args = run_parser.parse_args(remaining)
+        for k, v in run_args.__dict__.items():
+            setattr(args, k, v)
+        args.command = "run"
 
     runner.main(args)
 
