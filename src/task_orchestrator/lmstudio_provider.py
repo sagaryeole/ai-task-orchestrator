@@ -21,8 +21,8 @@ from pathlib import Path
 from urllib import request as urlrequest
 
 
-BASE_URL = os.environ.get("LM_STUDIO_URL", "http://127.0.0.1:1234/v1")
-MODEL = os.environ.get("LM_STUDIO_MODEL", "qwen/qwen3.5-9b")
+BASE_URL = os.environ.get("LM_STUDIO_URL", os.environ.get("PROVIDER_URL", "http://127.0.0.1:1234/v1"))
+MODEL = os.environ.get("LM_STUDIO_MODEL", os.environ.get("PROVIDER_MODEL", "qwen/qwen3.5-9b"))
 WORKING_DIR = os.environ.get("WORKING_DIR", ".")
 
 

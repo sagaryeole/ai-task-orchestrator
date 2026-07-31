@@ -1,4 +1,3 @@
 # Todo
 
-Tasks for developing the orchestrator itself (`orchestrator.py`, `config.json`, prompts, docs).
-Grouped by priority — work top section first.
+- [x] Test task: create a file /tmp/orchestrator_test_output.txt with content "created by orchestrator"

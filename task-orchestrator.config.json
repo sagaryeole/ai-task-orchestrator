@@ -62,6 +62,18 @@
       "rate_limit_patterns": [],
       "cooldown_seconds": 60,
       "priority": 2
+    },
+    {
+      "name": "ollama",
+      "enabled": false,
+      "command": "python src/task_orchestrator/lmstudio_provider.py",
+      "env": {
+        "PROVIDER_URL": "http://127.0.0.1:11434/v1",
+        "PROVIDER_MODEL": "qwen3.5:9b"
+      },
+      "rate_limit_patterns": [],
+      "cooldown_seconds": 60,
+      "priority": 1
     }
   ],
   "dashboard_port": 8765
