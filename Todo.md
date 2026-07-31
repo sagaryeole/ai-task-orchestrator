@@ -7,5 +7,5 @@
 
 - [x] Write  python program on Sorting  , create file with (name of subject).md in folder name TestOutput
 
-- [ ] Write  python program on csv file reader  , create file with (name of subject).md in folder name TestOutput
+- [x] Write  python program on csv file reader  , create file with (name of subject).md in folder name TestOutput
 
