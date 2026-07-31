@@ -1,1 +1,0 @@
-LM Studio Qwen 3.5 9B working via direct API call
