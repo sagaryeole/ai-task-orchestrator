@@ -28,6 +28,7 @@ _CHECKBOX_TASK_RE = re.compile(r"^\s*[-*]\s\[([ xX])\]\s+(.+)$")
 TEMPLATE_PATH = Path(__file__).resolve().parent.parent.parent / "dashboard" / "templates" / "index.html"
 STATIC_PATH = Path(__file__).resolve().parent.parent.parent / "dashboard" / "static"
 _dashboard_server_ref = None
+_dashboard_lock = threading.Lock()
 
 
 def _shutdown_dashboard_server():
@@ -67,8 +68,9 @@ def _dashboard_task_id(title, index_for_title):
     return f"{title}#{index_for_title}"
 
 
-def refresh_dashboard_tasks_from_todo(todo_path):
-    """Sync dashboard task cards with Todo.md while preserving runtime fields."""
+def _refresh_dashboard_tasks_from_todo_unlocked(todo_path):
+    """Sync dashboard task cards with Todo.md while preserving runtime fields.
+    Caller must hold _dashboard_lock."""
     state = _dashboard_state
     todo_entries = _load_all_todo_tasks(todo_path)
     previous = {t.get("id"): t for t in state.get("tasks", []) if isinstance(t, dict)}
@@ -103,6 +105,12 @@ def refresh_dashboard_tasks_from_todo(todo_path):
     state["todo_file"] = str(todo_path)
 
 
+def refresh_dashboard_tasks_from_todo(todo_path):
+    """Sync dashboard task cards with Todo.md while preserving runtime fields."""
+    with _dashboard_lock:
+        _refresh_dashboard_tasks_from_todo_unlocked(todo_path)
+
+
 def _find_next_task_card(title, preferred_statuses=None):
     preferred_statuses = preferred_statuses or ("pending", "skipped", "failed", "running")
     cards = _dashboard_state.get("tasks", [])
@@ -116,61 +124,64 @@ def _find_next_task_card(title, preferred_statuses=None):
 
 
 def mark_dashboard_tasks_running(task_titles, provider, attempt):
-    now_iso = _iso_now()
-    for title in task_titles:
-        card = _find_next_task_card(title, preferred_statuses=("pending", "skipped", "failed", "running"))
-        if not card:
-            continue
-        card["status"] = "running"
-        card["provider"] = provider
-        if not card.get("started_at") or card.get("finished_at"):
-            card["started_at"] = now_iso
-        card["finished_at"] = None
-        card["duration_seconds"] = None
-        card["attempt"] = max(int(card.get("attempt", 0)), int(attempt))
-        card["error_summary"] = None
-        card["exit_code"] = None
-        card["verification_passed"] = None
+    with _dashboard_lock:
+        now_iso = _iso_now()
+        for title in task_titles:
+            card = _find_next_task_card(title, preferred_statuses=("pending", "skipped", "failed", "running"))
+            if not card:
+                continue
+            card["status"] = "running"
+            card["provider"] = provider
+            if not card.get("started_at") or card.get("finished_at"):
+                card["started_at"] = now_iso
+            card["finished_at"] = None
+            card["duration_seconds"] = None
+            card["attempt"] = max(int(card.get("attempt", 0)), int(attempt))
+            card["error_summary"] = None
+            card["exit_code"] = None
+            card["verification_passed"] = None
 
 
 def mark_dashboard_tasks_skipped(task_titles, provider=None):
-    now_iso = _iso_now()
-    for title in task_titles:
-        card = _find_next_task_card(title)
-        if not card:
-            continue
-        card["status"] = "skipped"
-        if provider:
-            card["provider"] = provider
-        card["finished_at"] = now_iso
-        if card.get("started_at") and card.get("duration_seconds") is None:
-            try:
-                started = datetime.datetime.fromisoformat(card["started_at"])
-                card["duration_seconds"] = max(0.0, (datetime.datetime.now() - started).total_seconds())
-            except Exception:
-                pass
-        card["verification_passed"] = None
+    with _dashboard_lock:
+        now_iso = _iso_now()
+        for title in task_titles:
+            card = _find_next_task_card(title)
+            if not card:
+                continue
+            card["status"] = "skipped"
+            if provider:
+                card["provider"] = provider
+            card["finished_at"] = now_iso
+            if card.get("started_at") and card.get("duration_seconds") is None:
+                try:
+                    started = datetime.datetime.fromisoformat(card["started_at"])
+                    card["duration_seconds"] = max(0.0, (datetime.datetime.now() - started).total_seconds())
+                except Exception:
+                    pass
+            card["verification_passed"] = None
 
 
 def mark_dashboard_tasks_finished(task_titles, status, provider, duration_seconds, exit_code=None, verification_passed=None, error_summary=None):
-    now_dt = datetime.datetime.now()
-    now_iso = now_dt.isoformat()
-    for title in task_titles:
-        card = _find_next_task_card(title)
-        if not card:
-            continue
-        card["status"] = status
-        card["provider"] = provider
-        if not card.get("started_at"):
-            try:
-                card["started_at"] = (now_dt - datetime.timedelta(seconds=float(duration_seconds))).isoformat()
-            except Exception:
-                card["started_at"] = now_iso
-        card["finished_at"] = now_iso
-        card["duration_seconds"] = float(duration_seconds) if duration_seconds is not None else None
-        card["exit_code"] = exit_code
-        card["verification_passed"] = verification_passed
-        card["error_summary"] = error_summary
+    with _dashboard_lock:
+        now_dt = datetime.datetime.now()
+        now_iso = now_dt.isoformat()
+        for title in task_titles:
+            card = _find_next_task_card(title)
+            if not card:
+                continue
+            card["status"] = status
+            card["provider"] = provider
+            if not card.get("started_at"):
+                try:
+                    card["started_at"] = (now_dt - datetime.timedelta(seconds=float(duration_seconds))).isoformat()
+                except Exception:
+                    card["started_at"] = now_iso
+            card["finished_at"] = now_iso
+            card["duration_seconds"] = float(duration_seconds) if duration_seconds is not None else None
+            card["exit_code"] = exit_code
+            card["verification_passed"] = verification_passed
+            card["error_summary"] = error_summary
 
 
 def _build_run_summary(state):
@@ -262,25 +273,26 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _serve_json(self):
-        state = _dashboard_state
-        now = time.time()
-        provider_list = []
-        for name, info in state.get("providers", {}).items():
-            provider_list.append({
-                "name": name,
-                "available": info.get("available", False),
-                "cooldown_until": info.get("cooldown_until"),
-            })
-        payload = {
-            "current_task": state.get("current_task"),
-            "current_provider": state.get("current_provider"),
-            "providers": provider_list,
-            "history": state.get("history", []),
-            "tasks": state.get("tasks", []),
-            "run_summary": _build_run_summary(state),
-            "uptime_seconds": round(now - state.get("start_time", now), 1) if state.get("start_time") else 0,
-        }
-        body = json.dumps(payload, indent=2).encode("utf-8")
+        with _dashboard_lock:
+            state = _dashboard_state
+            now = time.time()
+            provider_list = []
+            for name, info in state.get("providers", {}).items():
+                provider_list.append({
+                    "name": name,
+                    "available": info.get("available", False),
+                    "cooldown_until": info.get("cooldown_until"),
+                })
+            payload = {
+                "current_task": state.get("current_task"),
+                "current_provider": state.get("current_provider"),
+                "providers": provider_list,
+                "history": state.get("history", []),
+                "tasks": state.get("tasks", []),
+                "run_summary": _build_run_summary(state),
+                "uptime_seconds": round(now - state.get("start_time", now), 1) if state.get("start_time") else 0,
+            }
+            body = json.dumps(payload, indent=2).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
@@ -288,8 +300,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _serve_html(self):
-        state = _dashboard_state
-        body = _build_html(state).encode("utf-8")
+        with _dashboard_lock:
+            state = _dashboard_state
+            body = _build_html(state).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
@@ -333,22 +346,23 @@ def start_dashboard(port, retry_on_port_in_use=False, max_attempts=20):
 
 def update_dashboard_state(current_task=None, current_provider=None, provider_status=None, history_entry=None, todo_path=None):
     """Update the shared dashboard state. Called from the orchestrator main loop."""
-    state = _dashboard_state
-    if current_task is not None:
-        state["current_task"] = current_task
-    if current_provider is not None:
-        state["current_provider"] = current_provider
-    if provider_status is not None:
-        state["providers"] = provider_status
-    if history_entry is not None:
-        state.setdefault("history", [])
-        state["history"].append(history_entry)
-        if len(state["history"]) > _DASHBOARD_HISTORY_MAX:
-            state["history"] = state["history"][-_DASHBOARD_HISTORY_MAX:]
-    if todo_path is not None:
-        refresh_dashboard_tasks_from_todo(Path(todo_path))
-    if state.get("start_time") is None:
-        state["start_time"] = time.time()
+    with _dashboard_lock:
+        state = _dashboard_state
+        if current_task is not None:
+            state["current_task"] = current_task
+        if current_provider is not None:
+            state["current_provider"] = current_provider
+        if provider_status is not None:
+            state["providers"] = provider_status
+        if history_entry is not None:
+            state.setdefault("history", [])
+            state["history"].append(history_entry)
+            if len(state["history"]) > _DASHBOARD_HISTORY_MAX:
+                state["history"] = state["history"][-_DASHBOARD_HISTORY_MAX:]
+        if todo_path is not None:
+            _refresh_dashboard_tasks_from_todo_unlocked(Path(todo_path))
+        if state.get("start_time") is None:
+            state["start_time"] = time.time()
 
 
 def build_provider_status(providers, state):

@@ -36,6 +36,7 @@ from pathlib import Path
 
 from .dashboard import (
     _dashboard_state,
+    _dashboard_lock,  # noqa: F401 — re-exported for tests and direct mutation sites
     _dashboard_server_ref,  # noqa: F401 — re-exported for tests and signal handlers
     _shutdown_dashboard_server,
     start_dashboard,
@@ -1075,7 +1076,8 @@ def main(args=None):
                 pass
             else:
                 DASHBOARD_OPENED_SENTINEL.write_text("")
-    _dashboard_state["start_time"] = time.time()
+    with _dashboard_lock:
+        _dashboard_state["start_time"] = time.time()
 
     todo_path = Path(config["todo_file"])
     prompt_template = Path(config.get("prompt_template", "prompts/task_prompt.txt"))

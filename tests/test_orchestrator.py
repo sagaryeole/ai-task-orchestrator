@@ -5,6 +5,7 @@ import json
 import time
 import re
 import io
+import threading
 import datetime
 
 import sys
@@ -41,6 +42,7 @@ from task_orchestrator.orchestrator import (
     update_dashboard_state,
     build_provider_status,
     _dashboard_state,
+    _dashboard_lock,
     _build_html,
     _write_pid_file,
     _remove_pid_file,
@@ -1450,6 +1452,43 @@ class TestUpdateDashboardState(unittest.TestCase):
         self.assertIsNotNone(first)
         update_dashboard_state(current_task="T2")
         self.assertEqual(_dashboard_state["start_time"], first)
+
+
+class TestDashboardLock(unittest.TestCase):
+    def setUp(self):
+        _dashboard_state.clear()
+        _dashboard_state["start_time"] = None
+
+    def test_lock_is_a_lock(self):
+        self.assertIsInstance(_dashboard_lock, type(threading.Lock()))
+
+    def test_concurrent_updates_and_reads_no_error(self):
+        errors = []
+
+        def writer():
+            try:
+                for i in range(200):
+                    update_dashboard_state(history_entry={"task": f"T{i}", "status": "complete"})
+            except Exception as e:
+                errors.append(e)
+
+        def reader():
+            try:
+                for _ in range(200):
+                    with _dashboard_lock:
+                        _ = list(_dashboard_state.get("history", []))
+                        _ = _dashboard_state.get("current_task")
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=writer) for _ in range(4)]
+        threads += [threading.Thread(target=reader) for _ in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertEqual(errors, [])
+        self.assertEqual(len(_dashboard_state["history"]), 50)
 
 
 class TestBuildHtml(unittest.TestCase):
