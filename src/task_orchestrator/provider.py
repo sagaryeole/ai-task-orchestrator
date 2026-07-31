@@ -1,13 +1,12 @@
 """Provider pool and executable resolution for task-orchestrator."""
 
 import os
-import sys
-import time
-import signal
 import shlex
 import shutil
 import subprocess
+import sys
 import threading
+import time
 
 from . import orchestrator
 from .git import _git_dirty_count
@@ -25,7 +24,10 @@ def _resolve_executable(executable, env=None):
 
     'python'/'python3' get an extra fallback: whichever name isn't on PATH
     falls back to the other, and finally to sys.executable (this process's
-    own interpreter, which always exists).
+    own interpreter, which always exists) -- the default config's
+    verify_commands and stats_command entries are plain 'python ...' strings,
+    and only one of 'python'/'python3' is guaranteed to exist on any given
+    OS/distro, so a literal name alone isn't portable.
     """
     if not executable:
         return executable
@@ -58,7 +60,16 @@ def _resolve_executable(executable, env=None):
 
 def _resolve_shell_python(cmd: str) -> str:
     """Rewrite a leading bare 'python'/'python3' token in a shell command
-    string to whichever interpreter _resolve_executable finds available."""
+    string to whichever interpreter _resolve_executable finds available.
+    Used for verify_commands/stats_command, which run as shell strings
+    rather than argv lists.
+
+    These strings are executed with shell=True, which on Windows means
+    cmd.exe (not a POSIX shell). shlex only understands POSIX quoting, so
+    re-serializing the whole command with shlex.join() after splitting can
+    produce single-quoted output cmd.exe can't parse. Instead, substitute
+    just the leading token in the original string and leave everything
+    else -- including its original quoting -- untouched."""
     try:
         tokens = shlex.split(cmd, posix=(os.name != "nt"))
     except ValueError:

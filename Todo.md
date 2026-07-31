@@ -43,7 +43,7 @@ Tasks to make the project easier to contribute to, easier to maintain, and frien
 
 - [x] `src/task_orchestrator/config.py` — `load_config`, `validate_config`, `_interpolate_env_vars`, `_deep_merge`, `lint_config`, `GLOBAL_CONFIG_PATH`, `_INTERACTIVE_LAUNCHERS`.
 - [x] `src/task_orchestrator/git.py` — `git_run`, `_git_dirty_count`, `validate_git_working_tree`, `_is_transient_git_error`, `_todo_lock`, and all Todo.md read/write/count helpers (`load_tasks`, `mark_complete`, `defer_task`, `count_total_tasks`, `count_completed_tasks`, `_get_section_for_line`, `_count_matching_lines`).
-- [ ] `src/task_orchestrator/provider.py` — `Provider` class, `load_providers`, `pick_next_provider`, `seconds_until_next_available`, `print_provider_status`, `_resolve_executable`, `_resolve_shell_python`, `_PYTHON_ALIASES`.
+- [x] `src/task_orchestrator/provider.py` — `Provider` class, `load_providers`, `pick_next_provider`, `seconds_until_next_available`, `print_provider_status`, `_resolve_executable`, `_resolve_shell_python`, `_PYTHON_ALIASES`.
 - [x] `src/task_orchestrator/notify.py` — `notify`, `_play_audio_cue`, `_applescript_escape`, `_print_startup_banner`.
 - [x] `src/task_orchestrator/orchestrator.py` — the main loop, `run_verification`, `build_prompt`, `build_retry_prompt`, `print_summary`, `print_progress`, `print_run_report_card`, `git_commit`, `run_provider_stats`, `_process_group_cpu_percent`, `_kill_process_tree`, `_sigint_handler`, `_sigterm_handler`, `_start_keyboard_listener`, `_interactive_options`, `_control_state`.
 - [x] Keep `runner.py` as a compatibility shim that re-exports from the new modules, so `from orchestrator import main` still works for the runtime shim. Tests should import from the new modules directly.
