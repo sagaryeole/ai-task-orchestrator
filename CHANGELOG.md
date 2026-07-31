@@ -22,6 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`config.schema.json` renamed** to `task-orchestrator.config.schema.json` for the same collision-avoidance reason; it has no secrets and stays tracked in git. Update any `"$schema"` reference in your config file.
 - **`config.copilot.json` renamed** to `task-orchestrator.config.copilot.json`, still committed to this repo as-is — this project's own config files are the dogfood configs that drive its own `Todo.md` and carry no secrets, so unlike the `init`-scaffolded gitignore default for other projects, they stay tracked here.
 
+### Deprecated
+
+### Removed
+
+### Security
+
 ## [2.0.0] - 2026-07-24
 
 ### Added
