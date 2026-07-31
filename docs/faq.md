@@ -15,7 +15,7 @@ The orchestrator is fully offline. Only your provider CLIs (Copilot, Claude, etc
 
 ### What AI models/providers does this work with?
 
-Any CLI that accepts a text prompt and exits when done. It's not tied to any specific AI provider — if you can invoke it from a terminal, it works. Tested with: GitHub Copilot CLI, Claude Code, Kilo Code, Aider, and Ollama.
+Any CLI that accepts a text prompt and exits when done. It's not tied to any specific AI provider — if you can invoke it from a terminal, it works. Tested with: GitHub Copilot CLI, Claude Code, Kilo Code, Aider, Ollama, and Lm Studio.
 
 ### Does this require an internet connection?
 

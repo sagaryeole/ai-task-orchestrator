@@ -8,7 +8,7 @@
   "max_retries_per_provider": 1,
   "require_manual_confirmation": false,
   "continue_on_failure": true,
-  "auto_commit": false,
+  "auto_commit": true,
   "verify_commands": [
     "python -m unittest discover -s tests"
   ],
@@ -57,22 +57,6 @@
       "rate_limit_patterns": [],
       "cooldown_seconds": 60,
       "priority": 1
-    },
-    {
-      "name": "kilo-lmstudio",
-      "enabled": false,
-      "command": "kilo run --auto",
-      "env": {
-        "LM_STUDIO_MODEL": "qwen/qwen3.5-9b",
-        "OPENAI_API_BASE_URL": "http://127.0.0.1:1234/v1",
-        "OPENAI_BASE_URL": "http://127.0.0.1:1234/v1",
-        "OPENAI_API_KEY": "lm-studio",
-        "KILO_MODEL_ID": "qwen/qwen3.5-9b",
-        "KILO_PROVIDER": "openai"
-      },
-      "rate_limit_patterns": [],
-      "cooldown_seconds": 60,
-      "priority": 2
     },
     {
       "name": "ollama",

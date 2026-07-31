@@ -96,7 +96,27 @@ The orchestrator launches your provider's `command` as a subprocess, passes the 
 }
 ```
 
-No rate limits (local), low priority as fallback.
+Tested and working with local models. No rate limits (local).
+
+**Prompt mode:** Stdin
+
+## Lm Studio (Local)
+
+```json
+{
+  "name": "lmstudio",
+  "command": "python src/task_orchestrator/lmstudio_provider.py",
+  "env": {
+    "LM_STUDIO_URL": "http://127.0.0.1:1234/v1",
+    "LM_STUDIO_MODEL": "qwen/qwen3.5-9b"
+  },
+  "rate_limit_patterns": [],
+  "cooldown_seconds": 60,
+  "priority": 1
+}
+```
+
+Tested and working with Lm Studio's OpenAI-compatible API endpoint. Requires Lm Studio running locally with a model loaded.
 
 **Prompt mode:** Stdin
 
@@ -114,7 +134,7 @@ Combine providers with priority for automatic failover:
 }
 ```
 
-The orchestrator uses the highest-priority available provider. When Claude is rate-limited, it falls to Copilot. When both are exhausted, it uses the local Ollama model.
+The orchestrator uses the highest-priority available provider. When Claude is rate-limited, it falls to Copilot. When both are exhausted, it uses the local Ollama or Lm Studio model.
 
 ## Adding Your Own Provider
 

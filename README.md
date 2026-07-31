@@ -66,7 +66,8 @@ task-orchestrator --once
 | Claude Code | `claude -p --permission-mode bypassPermissions` | stdin | Yes | Set `ANTHROPIC_API_KEY` in `env` for API billing, or leave `env` empty to use an already-logged-in subscription session |
 | Kilo Code | `kilo run --auto` | stdin | Yes | Use `--auto` for unattended runs |
 | Codex CLI | `codex --quiet` | stdin | Partial | May require additional no-interactive flags |
-| Ollama (local) | `ollama run codellama` | stdin | Partial | Good local fallback, no remote rate limits |
+| Ollama (local) | `ollama run codellama` | stdin | Yes | Good local fallback, no remote rate limits |
+| Lm Studio (local) | `python src/task_orchestrator/lmstudio_provider.py` | stdin | Yes | OpenAI-compatible local server; set `LM_STUDIO_URL` and `LM_STUDIO_MODEL` in `env` |
 
 ## Motivation
 
@@ -383,7 +384,8 @@ Prerequisites:
 | Kilo Code | `kilo run --auto` | Stdin | ✅ | Interactive by default; `--auto` required |
 | Codex CLI | `codex --quiet` | Stdin | Untested | May need `--no-interactive` |
 | Aider | `aider --yes --message {{TASK}}` | Arg | Untested | Auto-confirms with `--yes` |
-| Ollama (local) | `ollama run codellama` | Stdin | Untested | No rate limits (local) |
+| Ollama (local) | `ollama run codellama` | Stdin | Yes | No rate limits (local) |
+| Lm Studio (local) | `python src/task_orchestrator/lmstudio_provider.py` | Stdin | Yes | OpenAI-compatible local server; set `LM_STUDIO_URL` and `LM_STUDIO_MODEL` in `env` |
 
 ## Dashboard
 

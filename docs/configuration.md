@@ -122,6 +122,25 @@ The `on_failure` field controls what happens when a task fails all retries:
       "rate_limit_patterns": ["rate limit", "429", "too many requests"],
       "cooldown_seconds": 300,
       "priority": 5
+    },
+    {
+      "name": "ollama",
+      "command": "ollama run codellama",
+      "env": {},
+      "rate_limit_patterns": [],
+      "cooldown_seconds": 60,
+      "priority": 2
+    },
+    {
+      "name": "lmstudio",
+      "command": "python src/task_orchestrator/lmstudio_provider.py",
+      "env": {
+        "LM_STUDIO_URL": "http://127.0.0.1:1234/v1",
+        "LM_STUDIO_MODEL": "qwen/qwen3.5-9b"
+      },
+      "rate_limit_patterns": [],
+      "cooldown_seconds": 60,
+      "priority": 1
     }
   ]
 }

@@ -1,5 +1,5 @@
 {
-  "_comment": "Multi-provider setup: Claude primary, Copilot fallback, local Ollama last resort",
+  "_comment": "Multi-provider setup: Claude primary, Copilot fallback, local Ollama and Lm Studio last resort",
   "todo_file": "Todo.md",
   "working_directory": ".",
   "prompt_template": "prompts/task_prompt.txt",
@@ -35,6 +35,18 @@
       "enabled": true,
       "command": "ollama run codellama",
       "env": {},
+      "rate_limit_patterns": [],
+      "cooldown_seconds": 60,
+      "priority": 2
+    },
+    {
+      "name": "lmstudio-local",
+      "enabled": true,
+      "command": "python src/task_orchestrator/lmstudio_provider.py",
+      "env": {
+        "LM_STUDIO_URL": "http://127.0.0.1:1234/v1",
+        "LM_STUDIO_MODEL": "qwen/qwen3.5-9b"
+      },
       "rate_limit_patterns": [],
       "cooldown_seconds": 60,
       "priority": 1

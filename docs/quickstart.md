@@ -78,6 +78,39 @@ Edit `task-orchestrator.config.json` and set your agent CLI command:
     }
     ```
 
+=== "Ollama (local)"
+
+    ```json
+    {
+      "providers": [{
+        "name": "ollama",
+        "command": "ollama run codellama",
+        "env": {},
+        "rate_limit_patterns": [],
+        "cooldown_seconds": 10,
+        "priority": 1
+      }]
+    }
+    ```
+
+=== "Lm Studio (local)"
+
+    ```json
+    {
+      "providers": [{
+        "name": "lmstudio",
+        "command": "python src/task_orchestrator/lmstudio_provider.py",
+        "env": {
+          "LM_STUDIO_URL": "http://127.0.0.1:1234/v1",
+          "LM_STUDIO_MODEL": "qwen/qwen3.5-9b"
+        },
+        "rate_limit_patterns": [],
+        "cooldown_seconds": 60,
+        "priority": 1
+      }]
+    }
+    ```
+
 ## Add Tasks
 
 Edit `Todo.md`:
