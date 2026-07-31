@@ -31,7 +31,7 @@ from .orchestrator import *  # noqa: F401,F403
 def __getattr__(name: str) -> object:
     """Forward private/underscore-prefixed lookups to the submodules."""
     from importlib import import_module
-    for mod_name in ("orchestrator", "git", "dashboard", "notify"):
+    for mod_name in ("orchestrator", "config", "git", "dashboard", "notify"):
         try:
             mod = import_module(f".{mod_name}", __package__ or __name__)
         except ImportError:

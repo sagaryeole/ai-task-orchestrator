@@ -58,7 +58,6 @@ from task_orchestrator.orchestrator import (
     _mask_secrets,
     _secret_values,
     _sigterm_handler,
-    GLOBAL_CONFIG_PATH,
 )
 
 
@@ -1998,7 +1997,7 @@ class TestGlobalConfigMerge(unittest.TestCase):
                 "providers": [{"name": "project-p", "command": "echo hi", "env": {}, "rate_limit_patterns": []}],
             }))
 
-            with patch("task_orchestrator.orchestrator.GLOBAL_CONFIG_PATH", global_cfg_path):
+            with patch("task_orchestrator.config.GLOBAL_CONFIG_PATH", global_cfg_path):
                 config = load_config(project_cfg_path)
 
         self.assertEqual(config["delay_seconds"], 999)  # only in global -> inherited
@@ -2013,7 +2012,7 @@ class TestGlobalConfigMerge(unittest.TestCase):
                 "todo_file": "Todo.md",
                 "providers": [{"name": "p", "command": "echo hi", "env": {}, "rate_limit_patterns": []}],
             }))
-            with patch("task_orchestrator.orchestrator.GLOBAL_CONFIG_PATH", missing_global):
+            with patch("task_orchestrator.config.GLOBAL_CONFIG_PATH", missing_global):
                 config = load_config(project_cfg_path)
         self.assertEqual(config["providers"][0]["name"], "p")
 
