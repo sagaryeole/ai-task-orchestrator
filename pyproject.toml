@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "task-orchestrator"
-version = "2.0.0"
+version = "3.0.0"
 description = "AI-agnostic orchestrator that drives coding-agent CLIs through a task backlog with rate-limit-aware provider rotation."
 readme = "README.md"
 license = "MIT"

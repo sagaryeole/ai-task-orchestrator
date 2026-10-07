@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-10-07
+
 ### Added
 - **`tasks_per_batch` config field** (default `1`, hard-capped at `5`) — bundles up to N pending tasks into a single agent invocation and a single `verify_commands` run, amortizing per-task build/test overhead across them. Completion is all-or-nothing for the whole batch (same failure/retry/defer/skip path as a single failed task today); there's no reliable way to attribute a mixed batch outcome to individual tasks since they share one exit code and one git-diff check.
 - **`verify_timeout_seconds` config field** (default `1800`, `null` = no limit) — `verify_commands` previously had no timeout at all; a hanging build/test command blocked the orchestrator forever with no recovery, since it runs after the agent's own subprocess has already exited and isn't covered by stall detection.
